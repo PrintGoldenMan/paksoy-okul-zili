@@ -1,0 +1,891 @@
+"""Ayarlar penceresi.
+
+Görünen sekmeler ve seçenekler seçilen ayar düzeyine göre değişir:
+  Basit    : Genel, Ders Saatleri (süreler), Zil Sesleri (hazır sesler)
+  Gelişmiş : + ders saatlerini tek tek girme, kendi ses dosyaları, okul günleri,
+             tatiller, Türkçe sesli anonslar
+  Uzman    : + güne özel ders saatleri, ek ziller, zil tekrarı/ses düzeyi,
+             anons motoru ve hızı, yedekleme, kayıtlar
+Düzey yalnızca neyin görüneceğini belirler; yapılmış ayarlar düzey değişse de geçerlidir.
+"""
+
+import copy
+import datetime as dt
+import os
+import subprocess
+import sys
+
+import customtkinter as ctk
+from tkinter import filedialog, messagebox
+
+from .. import autostart, config, paths, schedule, sounds, tts
+from ..config import BELL_NAMES, BELL_TYPES, LEVEL_DESCRIPTIONS, LEVEL_NAMES, LEVELS
+from ..schedule import fmt_hm, parse_hm
+from ..turkish import DAYS, capitalize_first, ordinal_word
+from . import theme
+from .widgets import Card, Spin, labeled_row, time_entry
+
+LEVEL_RANK = {lv: i for i, lv in enumerate(LEVELS)}
+SHORT_DAYS = ["Pzt", "Sal", "Çar", "Per", "Cum", "Cmt", "Paz"]
+THEMES = {"system": "Sistem ile aynı", "light": "Açık", "dark": "Koyu"}
+CHOOSE_FILE = "Dosya seç…"
+
+
+class SoundPicker(ctk.CTkFrame):
+    """Hazır ses / kendi dosyası seçimi ve dinleme düğmesi."""
+
+    def __init__(self, master, player, sound_id, allow_files, allow_none=True):
+        super().__init__(master, fg_color="transparent")
+        self.player = player
+        self.sound_id = sound_id or "builtin:klasik"
+        self.allow_files = allow_files
+        self.allow_none = allow_none
+        self.menu = ctk.CTkOptionMenu(self, width=250, command=self._on_select, dynamic_resizing=False)
+        self.menu.pack(side="left")
+        ctk.CTkButton(self, text="▶ Dinle", width=80, command=self._preview).pack(side="left", padx=(8, 0))
+        self._refresh()
+
+    def _choices(self):
+        opts = [(f"builtin:{k}", v) for k, v in sounds.BUILTIN_SOUNDS.items()]
+        if self.sound_id.startswith("file:"):
+            opts.append((self.sound_id, sounds.display_name(self.sound_id)))
+        if self.allow_none:
+            opts.append((sounds.NO_SOUND, sounds.NO_SOUND_NAME))
+        return opts
+
+    def _refresh(self):
+        opts = self._choices()
+        values = [name for _, name in opts] + ([CHOOSE_FILE] if self.allow_files else [])
+        self.menu.configure(values=values)
+        self.menu.set(sounds.display_name(self.sound_id))
+
+    def _on_select(self, name):
+        if name == CHOOSE_FILE:
+            path = filedialog.askopenfilename(
+                parent=self, title="Zil sesi seçin",
+                filetypes=[("Ses dosyaları", "*.mp3 *.wav *.ogg"), ("Tüm dosyalar", "*.*")])
+            if path:
+                self.sound_id = "file:" + path
+            self._refresh()
+            return
+        for sid, n in self._choices():
+            if n == name:
+                self.sound_id = sid
+                return
+
+    def _preview(self):
+        self.player.preview_sound(self.sound_id)
+
+    def get(self):
+        return self.sound_id
+
+
+class LessonTable(ctk.CTkFrame):
+    """Ders başlangıç/bitiş saatlerini tek tek düzenleme tablosu."""
+
+    def __init__(self, master, lessons, fill_source=None):
+        super().__init__(master, fg_color="transparent")
+        self.fill_source = fill_source
+        self.rows = []
+        self.table = ctk.CTkFrame(self, fg_color="transparent")
+        self.table.pack(fill="x")
+        btns = ctk.CTkFrame(self, fg_color="transparent")
+        btns.pack(fill="x", pady=(8, 0))
+        ctk.CTkButton(btns, text="+ Ders ekle", width=110, command=self._add_after_last).pack(side="left")
+        if fill_source:
+            ctk.CTkButton(btns, text="Otomatik saatlerle doldur", width=190, fg_color="transparent",
+                          border_width=1, text_color=theme.TEXT,
+                          command=lambda: self.set_lessons(fill_source())).pack(side="left", padx=8)
+        self.set_lessons(lessons)
+
+    def set_lessons(self, lessons):
+        for r in self.rows:
+            r[0].destroy()
+        self.rows = []
+        for start, end in lessons:
+            self._add(start, end)
+        self._renumber()
+
+    def _add(self, start="", end=""):
+        row = ctk.CTkFrame(self.table, fg_color="transparent")
+        row.pack(fill="x", pady=2)
+        lbl = ctk.CTkLabel(row, text="", width=70, anchor="w", font=theme.font(13, "bold"))
+        lbl.pack(side="left")
+        s = time_entry(row, start)
+        s.pack(side="left")
+        ctk.CTkLabel(row, text="–").pack(side="left", padx=6)
+        e = time_entry(row, end)
+        e.pack(side="left")
+        item = (row, lbl, s, e)
+        ctk.CTkButton(row, text="✕", width=30, fg_color="transparent", text_color=theme.DANGER,
+                      hover_color=theme.ROW_ALT, command=lambda: self._remove(item)).pack(side="left", padx=8)
+        self.rows.append(item)
+
+    def _add_after_last(self):
+        if self.rows:
+            try:
+                last_end = parse_hm(self.rows[-1][3].get())
+                self._add(fmt_hm(last_end + 10), fmt_hm(last_end + 50))
+            except ValueError:
+                self._add()
+        else:
+            self._add("08:30", "09:10")
+        self._renumber()
+
+    def _remove(self, item):
+        item[0].destroy()
+        self.rows.remove(item)
+        self._renumber()
+
+    def _renumber(self):
+        for i, (_, lbl, _, _) in enumerate(self.rows, start=1):
+            lbl.configure(text=f"{i}. ders")
+
+    def get(self, what="Ders saatleri"):
+        out = []
+        for i, (_, _, s, e) in enumerate(self.rows, start=1):
+            try:
+                a, b = parse_hm(s.get()), parse_hm(e.get())
+            except ValueError:
+                raise ValueError(f"{what}: {i}. dersin saati hatalı. Saatleri SS:DD biçiminde yazın (ör. 08:30).")
+            if b <= a:
+                raise ValueError(f"{what}: {i}. dersin bitişi başlangıcından sonra olmalı.")
+            out.append((a, b))
+        out.sort()
+        for (a1, b1), (a2, _) in zip(out, out[1:]):
+            if a2 < b1:
+                raise ValueError(f"{what}: {fmt_hm(a1)} ve {fmt_hm(a2)} dersleri çakışıyor.")
+        if not out:
+            raise ValueError(f"{what}: en az bir ders olmalı.")
+        return [[fmt_hm(a), fmt_hm(b)] for a, b in out]
+
+
+class SettingsWindow(ctk.CTkToplevel):
+    def __init__(self, master, app):
+        super().__init__(master)
+        self.app = app
+        self.cfg = copy.deepcopy(app.cfg)
+        self.level = self.cfg.get("level") or "basit"
+        self.title("Ayarlar")
+        self.geometry("960x760")
+        self.minsize(860, 600)
+        self.configure(fg_color=theme.WINDOW_BG)
+        self.transient(master)
+        self._collectors = []
+        self.tabs = None
+
+        top = ctk.CTkFrame(self, fg_color=theme.CARD_BG, corner_radius=0)
+        top.pack(fill="x")
+        ctk.CTkLabel(top, text="Ayarlar", font=theme.font(22, "bold")).pack(side="left", padx=20, pady=14)
+        lv = ctk.CTkFrame(top, fg_color="transparent")
+        lv.pack(side="right", padx=20)
+        ctk.CTkLabel(lv, text="Ayar düzeyi:", font=theme.font(13, "bold")).pack(side="left", padx=(0, 8))
+        self.level_seg = ctk.CTkSegmentedButton(
+            lv, values=[f"{LEVEL_NAMES[x]}" for x in LEVELS], command=self._on_level,
+            font=theme.font(13, "bold"), height=34)
+        self.level_seg.pack(side="left")
+        self.level_seg.set(LEVEL_NAMES[self.level])
+        self.level_desc = ctk.CTkLabel(self, text="", text_color=theme.MUTED, anchor="w", justify="left",
+                                       wraplength=900)
+        self.level_desc.pack(fill="x", padx=22, pady=(8, 0))
+
+        bottom = ctk.CTkFrame(self, fg_color="transparent")
+        bottom.pack(side="bottom", fill="x", padx=18, pady=12)
+        ctk.CTkButton(bottom, text="Kaydet", width=140, height=40, font=theme.font(15, "bold"),
+                      fg_color=theme.SUCCESS, hover_color=("#176b3a", "#27ae60"),
+                      command=self._save).pack(side="right")
+        ctk.CTkButton(bottom, text="Vazgeç", width=110, height=40, fg_color="transparent", border_width=1,
+                      text_color=theme.TEXT, command=self._cancel).pack(side="right", padx=10)
+        self.protocol("WM_DELETE_WINDOW", self._cancel)
+
+        self._build_tabs()
+        self.after(100, self.lift)
+
+    # -- düzen --------------------------------------------------------------
+
+    def _at_least(self, level):
+        return LEVEL_RANK[self.level] >= LEVEL_RANK[level]
+
+    def _build_tabs(self, keep=None):
+        if self.tabs is not None:
+            self.tabs.destroy()
+        self._collectors = []
+        self.level_desc.configure(text=f"{LEVEL_NAMES[self.level]}: {LEVEL_DESCRIPTIONS[self.level]}")
+        self.tabs = ctk.CTkTabview(self, fg_color=theme.WINDOW_BG, segmented_button_selected_color=theme.ACCENT)
+        self.tabs.pack(fill="both", expand=True, padx=12)
+        self.tabs._segmented_button.configure(font=theme.font(14, "bold"), height=34)
+        pages = [("Genel", self._tab_general), ("Ders Saatleri", self._tab_times), ("Zil Sesleri", self._tab_sounds)]
+        if self._at_least("gelismis"):
+            pages += [("Günler ve Tatiller", self._tab_days), ("Sesli Anons", self._tab_tts)]
+        if self._at_least("uzman"):
+            pages += [("Güne Özel Saatler", self._tab_overrides), ("Ek Ziller", self._tab_extra),
+                      ("Sistem", self._tab_system)]
+        for name, builder in pages:
+            tab = self.tabs.add(name)
+            frame = ctk.CTkScrollableFrame(tab, fg_color="transparent")
+            frame.pack(fill="both", expand=True)
+            frame.grid_columnconfigure(0, weight=1)
+            builder(frame)
+        if keep and keep in [p[0] for p in pages]:
+            self.tabs.set(keep)
+
+    def _rebuild(self):
+        """Mevcut girişleri kaydedip sekmeleri yeniden çizer."""
+        if not self._collect():
+            return False
+        self._build_tabs(keep=self.tabs.get())
+        return True
+
+    def _collect(self):
+        try:
+            for fn in self._collectors:
+                fn()
+        except ValueError as exc:
+            messagebox.showerror("Hatalı ayar", str(exc), parent=self)
+            return False
+        return True
+
+    def _on_level(self, name):
+        new = next(k for k, v in LEVEL_NAMES.items() if v == name)
+        if new == self.level:
+            return
+        if not self._collect():
+            self.level_seg.set(LEVEL_NAMES[self.level])
+            return
+        self.level = new
+        self.cfg["level"] = new
+        self._build_tabs(keep=self.tabs.get())
+
+    def _card(self, parent, title, subtitle=None):
+        c = Card(parent, title, subtitle)
+        c.grid(row=len(parent.grid_slaves()), column=0, sticky="ew", padx=4, pady=6)
+        return c.body
+
+    def _hint(self, parent, text, row=None):
+        lbl = ctk.CTkLabel(parent, text=text, text_color=theme.MUTED, font=theme.font(12),
+                           justify="left", anchor="w", wraplength=760)
+        lbl.grid(row=row if row is not None else len(parent.grid_slaves()), column=0, columnspan=4,
+                 sticky="w", pady=(4, 0))
+        return lbl
+
+    # -- sekmeler -----------------------------------------------------------
+
+    def _tab_general(self, f):
+        cfg = self.cfg
+        b = self._card(f, "Okul")
+        name = ctk.CTkEntry(b, width=420)
+        name.insert(0, cfg["school_name"])
+        labeled_row(b, 0, "Okulun adı", name)
+
+        b = self._card(f, "Görünüm")
+        theme_menu = ctk.CTkOptionMenu(b, values=list(THEMES.values()), width=200)
+        theme_menu.set(THEMES.get(cfg["theme"], THEMES["system"]))
+        labeled_row(b, 0, "Tema", theme_menu)
+
+        b = self._card(f, "Başlangıç ve Kapanış")
+        auto_var = ctk.BooleanVar(value=cfg.get("autostart", False))
+        cb = ctk.CTkCheckBox(b, text="Bilgisayar açılınca program otomatik başlasın (önerilir)", variable=auto_var)
+        cb.grid(row=0, column=0, columnspan=3, sticky="w", pady=4)
+        if not autostart.supported():
+            cb.configure(state="disabled", text=cb.cget("text") + " – yalnızca Windows'ta")
+        exit_var = ctk.BooleanVar(value=cfg.get("confirm_exit", True))
+        if self._at_least("uzman"):
+            ctk.CTkCheckBox(b, text="Program kapatılırken onay iste", variable=exit_var).grid(
+                row=1, column=0, columnspan=3, sticky="w", pady=4)
+
+        def collect():
+            if not name.get().strip():
+                raise ValueError("Okulun adı boş bırakılamaz.")
+            cfg["school_name"] = name.get().strip()
+            cfg["theme"] = next(k for k, v in THEMES.items() if v == theme_menu.get())
+            cfg["autostart"] = bool(auto_var.get())
+            cfg["confirm_exit"] = bool(exit_var.get())
+        self._collectors.append(collect)
+
+    def _tab_times(self, f):
+        cfg, t = self.cfg, self.cfg["timing"]
+        manual_active = cfg.get("schedule_mode") == "manual"
+        overrides_active = bool(cfg.get("day_overrides"))
+
+        if self.level == "basit" and (manual_active or overrides_active):
+            b = self._card(f, "⚠ Ders saatleri elle ayarlanmış")
+            self._hint(b, "Ders saatleri Gelişmiş veya Uzman düzeyde tek tek girilmiş. Aşağıdaki süreler şu anda "
+                          "kullanılmıyor. Süreleri kullanmak için aşağıdaki düğmeye basın.", row=0)
+
+            def back_to_auto():
+                cfg["schedule_mode"] = "auto"
+                cfg["day_overrides"] = {}
+                self._rebuild()
+            ctk.CTkButton(b, text="Süreleri kullan (otomatik hesaplama)", command=back_to_auto).grid(
+                row=1, column=0, sticky="w", pady=(8, 0))
+
+        if self._at_least("gelismis"):
+            b = self._card(f, "Ders saatleri nasıl belirlensin?")
+            modes = {"auto": "Süreleri gireyim, saatler hesaplansın", "manual": "Her dersin saatini tek tek gireyim"}
+            seg = ctk.CTkSegmentedButton(b, values=list(modes.values()))
+            seg.set(modes[cfg.get("schedule_mode", "auto")])
+            seg.grid(row=0, column=0, sticky="w")
+
+            def on_mode(value):
+                old = cfg.get("schedule_mode", "auto")
+                cfg["schedule_mode"] = next(k for k, v in modes.items() if v == value)
+                if not self._rebuild():
+                    cfg["schedule_mode"] = old
+                    seg.set(modes[old])
+            seg.configure(command=on_mode)
+
+        if cfg.get("schedule_mode") == "manual" and self._at_least("gelismis"):
+            b = self._card(f, "Ders Saatleri", "Her dersin başlangıç ve bitiş saatini yazın (ör. 08:30). "
+                                               "Teneffüsler aradaki boşluklardan otomatik hesaplanır.")
+            table = LessonTable(b, cfg["manual_lessons"],
+                                fill_source=lambda: [[fmt_hm(a), fmt_hm(e)] for a, e in schedule.auto_lessons(t)])
+            table.grid(row=0, column=0, sticky="w")
+            self._collectors.append(lambda: cfg.__setitem__("manual_lessons", table.get()))
+            auto_widgets = None
+        else:
+            b = self._card(f, "Ders ve Teneffüs Süreleri",
+                           "İlk dersin saatini ve süreleri girin; tüm ders saatleri otomatik hesaplanır.")
+            first = time_entry(b, t["first_lesson"])
+            count = Spin(b, t["lesson_count"], 1, 12, suffix="ders")
+            length = Spin(b, t["lesson_minutes"], 10, 90, suffix="dakika")
+            brk = Spin(b, t["break_minutes"], 0, 60, suffix="dakika")
+            lunch_after = Spin(b, t["lunch_after"], 0, 12, suffix="dersten sonra")
+            lunch = Spin(b, t["lunch_minutes"], 0, 120, suffix="dakika")
+            labeled_row(b, 0, "İlk ders başlangıcı", first)
+            labeled_row(b, 1, "Günlük ders sayısı", count)
+            labeled_row(b, 2, "Ders süresi", length)
+            labeled_row(b, 3, "Teneffüs süresi", brk)
+            labeled_row(b, 4, "Öğle arası kaçıncı", lunch_after, "0 = öğle arası yok")
+            labeled_row(b, 5, "Öğle arası süresi", lunch)
+            auto_widgets = (first, count, length, brk, lunch_after, lunch)
+
+        b = self._card(f, "Öğrenci Zili", "Öğrenci zili, teneffüs bitmeden önce çalar; öğrenciler "
+                                          "öğretmenlerden önce sınıfa girer.")
+        offset = Spin(b, t["student_offset"], 0, 15, suffix="dakika önce")
+        labeled_row(b, 0, "Öğrenci zili, dersten", offset, "0 = öğrenci zili çalmasın")
+        morning = ctk.BooleanVar(value=t.get("morning_student_bell", True))
+        ctk.CTkCheckBox(b, text="Sabah ilk dersten önce de öğrenci zili çalsın", variable=morning).grid(
+            row=1, column=0, columnspan=3, sticky="w", pady=4)
+
+        def collect():
+            if auto_widgets:
+                first, count, length, brk, lunch_after, lunch = auto_widgets
+                try:
+                    parse_hm(first.get())
+                except ValueError:
+                    raise ValueError("İlk ders başlangıcı SS:DD biçiminde olmalı (ör. 08:30).")
+                try:
+                    t.update(first_lesson=fmt_hm(parse_hm(first.get())), lesson_count=count.get(),
+                             lesson_minutes=length.get(), break_minutes=brk.get(),
+                             lunch_after=lunch_after.get(), lunch_minutes=lunch.get())
+                except ValueError as exc:
+                    raise ValueError(f"Ders süreleri: {exc}")
+            try:
+                t["student_offset"] = offset.get()
+            except ValueError as exc:
+                raise ValueError(f"Öğrenci zili: {exc}")
+            t["morning_student_bell"] = bool(morning.get())
+        self._collectors.append(collect)
+
+        # Önizleme
+        b = self._card(f, "Önizleme", "Ayarlarınıza göre bir okul gününün zil çizelgesi.")
+        b.grid_columnconfigure(0, weight=1)
+        b.grid_columnconfigure(9, weight=0)
+        row = ctk.CTkFrame(b, fg_color="transparent")
+        row.grid(row=0, column=0, sticky="w")
+        box = ctk.CTkTextbox(b, height=260, font=ctk.CTkFont(family="Consolas", size=13))
+        box.grid(row=1, column=0, sticky="ew", pady=(6, 0))
+        day_menu = ctk.CTkOptionMenu(row, values=DAYS, width=150)
+        day_menu.set(DAYS[0])
+
+        def preview(*_):
+            if not self._collect():
+                return
+            wd = DAYS.index(day_menu.get())
+            lessons = schedule.lessons_for_weekday(self.cfg, wd)
+            events = schedule.events_for_lessons(self.cfg, lessons) + schedule.extra_events(self.cfg, wd)
+            events.sort(key=lambda e: e.minute)
+            box.configure(state="normal")
+            box.delete("1.0", "end")
+            if wd not in self.cfg["active_days"]:
+                box.insert("end", f"Not: {DAYS[wd]} okul günü olarak işaretli değil; bu gün zil çalmaz.\n\n")
+            for i, (a, e) in enumerate(lessons, start=1):
+                box.insert("end", f"{i}. ders   {fmt_hm(a)} – {fmt_hm(e)}\n")
+            box.insert("end", "\n")
+            for e in events:
+                box.insert("end", f"{e.time_str}   {e.label:<14} {e.note}\n")
+            box.configure(state="disabled")
+        day_menu.configure(command=preview)
+        day_menu.pack(side="left")
+        ctk.CTkButton(row, text="Önizlemeyi güncelle", command=preview).pack(side="left", padx=8)
+        self.after(50, preview)
+
+    def _tab_sounds(self, f):
+        cfg = self.cfg
+        b = self._card(f, "Genel Ses Düzeyi")
+        vol_lbl = ctk.CTkLabel(b, text="", width=50)
+        vol = ctk.CTkSlider(b, from_=0, to=100, number_of_steps=20, width=320,
+                            command=lambda v: vol_lbl.configure(text=f"%{int(v)}"))
+        vol.set(cfg["master_volume"])
+        vol_lbl.configure(text=f"%{int(cfg['master_volume'])}")
+        labeled_row(b, 0, "Ses düzeyi", vol)
+        vol_lbl.grid(row=0, column=2, padx=8)
+        ctk.CTkButton(b, text="■ Durdur", width=90, fg_color=theme.DANGER, hover_color=theme.DANGER_HOVER,
+                      command=self.app.player.stop).grid(row=0, column=3, padx=8)
+
+        pickers = {}
+        for kind in BELL_TYPES:
+            bell = cfg["bells"][kind]
+            sub = {"ogrenci": "Teneffüs bitmeden önce çalar; öğrenciler sınıfa girer.",
+                   "ogretmen": "Ders başladığında çalar; öğretmenler sınıfa girer.",
+                   "cikis": "Ders bittiğinde çalar."}[kind]
+            b = self._card(f, BELL_NAMES[kind], sub)
+            ctk.CTkFrame(b, width=6, height=30, corner_radius=3, fg_color=theme.BELL_COLORS[kind]).grid(
+                row=0, column=0, rowspan=3, sticky="ns", padx=(0, 10))
+            picker = SoundPicker(b, self.app.player, bell["sound"], allow_files=self._at_least("gelismis"))
+            picker.grid(row=0, column=1, sticky="w")
+            widgets = {"picker": picker}
+            if self._at_least("uzman"):
+                opt = ctk.CTkFrame(b, fg_color="transparent")
+                opt.grid(row=1, column=1, sticky="w", pady=(8, 0))
+                ctk.CTkLabel(opt, text="Kaç kez çalsın:").pack(side="left")
+                rep = Spin(opt, bell.get("repeat", 1), 1, 5)
+                rep.pack(side="left", padx=(6, 20))
+                ctk.CTkLabel(opt, text="Bu zilin ses düzeyi:").pack(side="left")
+                v = ctk.CTkSlider(opt, from_=10, to=100, number_of_steps=18, width=180)
+                v.set(bell.get("volume", 100))
+                v.pack(side="left", padx=6)
+                widgets.update(repeat=rep, volume=v)
+            pickers[kind] = widgets
+        self._hint(f, "İpucu: Öğrenci ve öğretmen zillerine farklı sesler seçerseniz kimin sınıfa "
+                      "gireceği kolayca anlaşılır.")
+
+        def collect():
+            cfg["master_volume"] = int(vol.get())
+            for kind, w in pickers.items():
+                cfg["bells"][kind]["sound"] = w["picker"].get()
+                if "repeat" in w:
+                    try:
+                        cfg["bells"][kind]["repeat"] = w["repeat"].get()
+                    except ValueError as exc:
+                        raise ValueError(f"{BELL_NAMES[kind]} tekrar sayısı: {exc}")
+                    cfg["bells"][kind]["volume"] = int(w["volume"].get())
+        self._collectors.append(collect)
+
+    def _tab_days(self, f):
+        cfg = self.cfg
+        b = self._card(f, "Okul Günleri", "Zillerin çalacağı günleri seçin.")
+        day_vars = []
+        row = ctk.CTkFrame(b, fg_color="transparent")
+        row.grid(row=0, column=0, columnspan=3, sticky="w")
+        for i, d in enumerate(DAYS):
+            v = ctk.BooleanVar(value=i in cfg["active_days"])
+            ctk.CTkCheckBox(row, text=d, variable=v, width=110).pack(side="left", pady=4)
+            day_vars.append(v)
+
+        b = self._card(f, "Tatiller", "Bu tarihlerde zil çalmaz. Tek günlük tatil için bitiş tarihini boş "
+                                      "bırakabilirsiniz. Tarihleri GG.AA.YYYY biçiminde yazın (ör. 29.10.2026).")
+        holder = ctk.CTkFrame(b, fg_color="transparent")
+        holder.grid(row=0, column=0, columnspan=3, sticky="ew")
+        head = ctk.CTkFrame(holder, fg_color="transparent")
+        head.pack(fill="x")
+        for text, w in (("Tatilin adı", 260), ("Başlangıç", 120), ("Bitiş", 120)):
+            ctk.CTkLabel(head, text=text, width=w, anchor="w", font=theme.font(12, "bold")).pack(side="left", padx=3)
+        rows = []
+
+        def to_tr(iso):
+            try:
+                return dt.date.fromisoformat(iso).strftime("%d.%m.%Y")
+            except (TypeError, ValueError):
+                return ""
+
+        def add(name="", start="", end=""):
+            r = ctk.CTkFrame(holder, fg_color="transparent")
+            r.pack(fill="x", pady=2)
+            n = ctk.CTkEntry(r, width=260, placeholder_text="ör. Yarıyıl Tatili")
+            s = ctk.CTkEntry(r, width=120, placeholder_text="GG.AA.YYYY")
+            e = ctk.CTkEntry(r, width=120, placeholder_text="GG.AA.YYYY")
+            for w, val in ((n, name), (s, to_tr(start)), (e, to_tr(end) if end != start else "")):
+                if val:
+                    w.insert(0, val)
+                w.pack(side="left", padx=3)
+            item = (r, n, s, e)
+            ctk.CTkButton(r, text="✕", width=30, fg_color="transparent", text_color=theme.DANGER,
+                          hover_color=theme.ROW_ALT, command=lambda: (r.destroy(), rows.remove(item))).pack(
+                side="left", padx=6)
+            rows.append(item)
+
+        for h in sorted(cfg["holidays"], key=lambda h: h.get("start", "")):
+            add(h.get("name", ""), h.get("start", ""), h.get("end", ""))
+
+        def add_official():
+            today = dt.date.today()
+            y = today.year if today.month >= 8 else today.year - 1
+            existing = {s.get() for _, _, s, _ in rows}
+            for name, d in (("Cumhuriyet Bayramı", dt.date(y, 10, 29)), ("Yılbaşı", dt.date(y + 1, 1, 1)),
+                            ("Ulusal Egemenlik ve Çocuk Bayramı", dt.date(y + 1, 4, 23)),
+                            ("Emek ve Dayanışma Günü", dt.date(y + 1, 5, 1)),
+                            ("Atatürk'ü Anma, Gençlik ve Spor Bayramı", dt.date(y + 1, 5, 19))):
+                if d.strftime("%d.%m.%Y") not in existing:
+                    add(name, d.isoformat(), d.isoformat())
+
+        btns = ctk.CTkFrame(b, fg_color="transparent")
+        btns.grid(row=1, column=0, columnspan=3, sticky="w", pady=(8, 0))
+        ctk.CTkButton(btns, text="+ Tatil ekle", width=110, command=add).pack(side="left")
+        ctk.CTkButton(btns, text="Resmî tatilleri ekle (bu eğitim yılı)", fg_color="transparent", border_width=1,
+                      text_color=theme.TEXT, command=add_official).pack(side="left", padx=8)
+        self._hint(b, "Dinî bayramların tarihleri her yıl değiştiği için onları elle eklemeniz gerekir.", row=2)
+
+        def parse_date(text, label):
+            try:
+                return dt.datetime.strptime(text.strip(), "%d.%m.%Y").date()
+            except ValueError:
+                raise ValueError(f"Tatiller: «{label}» için girilen «{text}» geçerli bir tarih değil. "
+                                 "GG.AA.YYYY biçiminde yazın (ör. 29.10.2026).")
+
+        def collect():
+            cfg["active_days"] = [i for i, v in enumerate(day_vars) if v.get()]
+            out = []
+            for _, n, s, e in rows:
+                if not (n.get().strip() or s.get().strip() or e.get().strip()):
+                    continue
+                label = n.get().strip() or "Tatil"
+                start = parse_date(s.get(), label)
+                end = parse_date(e.get(), label) if e.get().strip() else start
+                if end < start:
+                    raise ValueError(f"Tatiller: «{label}» için bitiş tarihi başlangıçtan önce olamaz.")
+                out.append({"name": label, "start": start.isoformat(), "end": end.isoformat()})
+            cfg["holidays"] = out
+        self._collectors.append(collect)
+
+    def _tab_tts(self, f):
+        cfg, tc = self.cfg, self.cfg["tts"]
+        b = self._card(f, "Sesli Anons", "Açılırsa zil sesinden sonra Türkçe bir anons okunur "
+                                         "(ör. «Sayın öğretmenlerimiz, üçüncü ders başlamıştır.»).")
+        enabled = ctk.BooleanVar(value=tc.get("enabled", False))
+        ctk.CTkSwitch(b, text="Sesli anonsları kullan", variable=enabled, font=theme.font(14, "bold")).grid(
+            row=0, column=0, columnspan=3, sticky="w", pady=4)
+        voice = ctk.CTkOptionMenu(b, values=list(tts.EDGE_VOICES.values()), width=200)
+        voice.set(tts.EDGE_VOICES.get(tc.get("voice"), "Emel (Kadın)"))
+        labeled_row(b, 1, "Ses", voice)
+        self._hint(b, "Anonslar ilk kez internet ile hazırlanır ve bilgisayara kaydedilir; sonrasında internet "
+                      "olmadan da çalar. Program açıkken günün anonsları önceden hazırlanır.", row=2)
+
+        expert = {}
+        if self._at_least("uzman"):
+            b = self._card(f, "Anons Motoru (Uzman)")
+            engine = ctk.CTkOptionMenu(b, values=list(tts.ENGINES.values()), width=380)
+            engine.set(tts.ENGINES.get(tc.get("engine", "edge")))
+            labeled_row(b, 0, "Motor", engine)
+            rate_lbl = ctk.CTkLabel(b, text="")
+            rate = ctk.CTkSlider(b, from_=-50, to=50, number_of_steps=20, width=260,
+                                 command=lambda v: rate_lbl.configure(text=f"{int(v):+d}%"))
+            rate.set(tc.get("rate", 0))
+            rate_lbl.configure(text=f"{int(tc.get('rate', 0)):+d}%")
+            labeled_row(b, 1, "Konuşma hızı", rate)
+            rate_lbl.grid(row=1, column=2, padx=8)
+            tvol = ctk.CTkSlider(b, from_=10, to=100, number_of_steps=18, width=260)
+            tvol.set(tc.get("volume", 100))
+            labeled_row(b, 2, "Anons ses düzeyi", tvol)
+            pause = Spin(b, tc.get("pause_ms", 400), 0, 5000, suffix="milisaniye")
+            labeled_row(b, 3, "Zil ile anons arası", pause)
+            off_voices = [("", "Otomatik (Türkçe ses varsa)")]
+            off_menu = ctk.CTkOptionMenu(b, values=[n for _, n in off_voices], width=380)
+            off_menu.set(off_voices[0][1])
+            labeled_row(b, 4, "Windows sesi", off_menu)
+
+            def load_voices():
+                found = tts.offline_voices()
+                off_voices[1:] = found
+                off_menu.configure(values=[n for _, n in off_voices])
+                for vid, n in off_voices:
+                    if vid == tc.get("offline_voice", ""):
+                        off_menu.set(n)
+                if not found:
+                    messagebox.showinfo("Windows sesleri", "Bu bilgisayarda Windows sesi bulunamadı.", parent=self)
+            ctk.CTkButton(b, text="Sesleri listele", width=120, command=load_voices).grid(row=4, column=2, padx=8)
+
+            def clear():
+                n = tts.clear_cache()
+                messagebox.showinfo("Önbellek", f"{n} kayıtlı anons silindi. Gerektiğinde yeniden hazırlanacak.",
+                                    parent=self)
+            ctk.CTkButton(b, text="Kayıtlı anonsları sil", fg_color="transparent", border_width=1,
+                          text_color=theme.TEXT, command=clear).grid(row=5, column=0, sticky="w", pady=(10, 0))
+            expert = dict(engine=engine, rate=rate, volume=tvol, pause=pause, off_menu=off_menu,
+                          off_voices=off_voices)
+
+        b = self._card(f, "Anons Metinleri",
+                       "Metinlerde şu kısaltmaları kullanabilirsiniz:  {ders_sira} → «üçüncü»,  "
+                       "{ders} → «3»,  {saat} → «10:10».")
+        texts = {}
+        r = 0
+        fields = [("ogrenci", "text", "Öğrenci zili"), ("ogretmen", "text", "Öğretmen zili"),
+                  ("cikis", "text", "Çıkış zili (teneffüs)"), ("cikis", "text_lunch", "Çıkış zili (öğle arası)"),
+                  ("cikis", "text_last", "Çıkış zili (son ders)")]
+        tts_flags = {}
+        for kind, key, label in fields:
+            if kind not in tts_flags:
+                v = ctk.BooleanVar(value=cfg["bells"][kind].get("tts", True))
+                ctk.CTkCheckBox(b, text=f"{BELL_NAMES[kind]} çalınca anons yap", variable=v,
+                                font=theme.font(13, "bold")).grid(row=r, column=0, columnspan=3, sticky="w",
+                                                                  pady=(10 if r else 0, 2))
+                tts_flags[kind] = v
+                r += 1
+            ctk.CTkLabel(b, text=label, anchor="w", width=170).grid(row=r, column=0, sticky="w")
+            e = ctk.CTkEntry(b, width=520)
+            e.insert(0, cfg["bells"][kind].get(key, ""))
+            e.grid(row=r, column=1, sticky="w", pady=2)
+            ctk.CTkButton(b, text="▶ Dene", width=70, command=lambda e=e: self._try_text(e.get())).grid(
+                row=r, column=2, padx=8)
+            texts[(kind, key)] = e
+            r += 1
+
+        def collect():
+            tc["enabled"] = bool(enabled.get())
+            tc["voice"] = next(k for k, v in tts.EDGE_VOICES.items() if v == voice.get())
+            for (kind, key), e in texts.items():
+                cfg["bells"][kind][key] = e.get().strip()
+            for kind, v in tts_flags.items():
+                cfg["bells"][kind]["tts"] = bool(v.get())
+            if expert:
+                tc["engine"] = next(k for k, v in tts.ENGINES.items() if v == expert["engine"].get())
+                tc["rate"] = int(expert["rate"].get())
+                tc["volume"] = int(expert["volume"].get())
+                try:
+                    tc["pause_ms"] = expert["pause"].get()
+                except ValueError as exc:
+                    raise ValueError(f"Zil ile anons arası: {exc}")
+                chosen = expert["off_menu"].get()
+                tc["offline_voice"] = next((vid for vid, n in expert["off_voices"] if n == chosen), "")
+        self._collectors.append(collect)
+
+    def _try_text(self, template):
+        """Anons metnini, pencerede seçili (henüz kaydedilmemiş) ses ayarlarıyla okur."""
+        if not self._collect():
+            return
+        try:
+            text = template.format(ders=3, ders_sira=ordinal_word(3), saat="10:10")
+        except (KeyError, IndexError, ValueError):
+            text = template
+        text = capitalize_first(text.strip())
+        if text:
+            self.app.player.stop()
+            self.app.player.say(text, tts_cfg=copy.deepcopy(self.cfg["tts"]))
+
+    def _tab_overrides(self, f):
+        cfg = self.cfg
+        self._hint(f, "Belirli bir günün ders saatleri farklıysa (ör. Cuma günü erken çıkış) o gün için özel "
+                      "saatler girebilirsiniz. Özel saat girilmeyen günlerde «Ders Saatleri» sekmesindeki "
+                      "ayarlar kullanılır.", row=0)
+        seg = ctk.CTkSegmentedButton(f, values=DAYS)
+        seg.grid(row=1, column=0, sticky="w", pady=8, padx=4)
+        pages = {}
+        for wd, day in enumerate(DAYS):
+            current = cfg["day_overrides"].get(str(wd))
+            card = Card(f, f"{day} günü ders saatleri")
+            use = ctk.BooleanVar(value=bool(current))
+            ctk.CTkCheckBox(card.body, text=f"{day} için özel ders saatleri kullan", variable=use).grid(
+                row=0, column=0, sticky="w")
+            base = current or [[fmt_hm(a), fmt_hm(b)] for a, b in schedule.lessons_for_weekday(
+                dict(cfg, day_overrides={}), wd)]
+            table = LessonTable(card.body, base, fill_source=lambda wd=wd: [
+                [fmt_hm(a), fmt_hm(b)] for a, b in schedule.lessons_for_weekday(dict(self.cfg, day_overrides={}), wd)])
+            table.grid(row=1, column=0, sticky="w", pady=(8, 0))
+            pages[wd] = (card, use, table)
+
+        def show(day):
+            wd = DAYS.index(day)
+            for i, (card, _, _) in pages.items():
+                if i == wd:
+                    card.grid(row=2, column=0, sticky="ew", padx=4, pady=6)
+                else:
+                    card.grid_remove()
+        seg.configure(command=show)
+        first = next((int(k) for k in sorted(cfg["day_overrides"])), 4)
+        seg.set(DAYS[first])
+        show(DAYS[first])
+
+        def collect():
+            out = {}
+            for wd, (_, use, table) in pages.items():
+                if use.get():
+                    out[str(wd)] = table.get(f"{DAYS[wd]} özel saatleri")
+            cfg["day_overrides"] = out
+        self._collectors.append(collect)
+
+    def _tab_extra(self, f):
+        cfg = self.cfg
+        self._hint(f, "Ders zilleri dışında belirli gün ve saatlerde çalacak ziller ekleyebilirsiniz "
+                      "(ör. Pazartesi bayrak töreni, İstiklal Marşı, öğle namazı arası vb.).", row=0)
+        holder = ctk.CTkFrame(f, fg_color="transparent", height=1)
+        holder.grid(row=1, column=0, sticky="ew")
+        holder.grid_columnconfigure(0, weight=1)
+        items = []
+
+        def add(e=None):
+            e = e or {"enabled": True, "time": "08:20", "days": [0], "label": "Yeni zil",
+                      "sound": "builtin:gong", "text": "", "repeat": 1}
+            card = ctk.CTkFrame(holder, fg_color=theme.CARD_BG, corner_radius=12)
+            card.grid(row=len(items), column=0, sticky="ew", pady=5, padx=4)
+            line1 = ctk.CTkFrame(card, fg_color="transparent")
+            line1.pack(fill="x", padx=12, pady=(10, 4))
+            en = ctk.BooleanVar(value=e.get("enabled", True))
+            ctk.CTkCheckBox(line1, text="Etkin", variable=en, width=70).pack(side="left")
+            label = ctk.CTkEntry(line1, width=220, placeholder_text="Zilin adı")
+            label.insert(0, e.get("label", ""))
+            label.pack(side="left", padx=6)
+            ctk.CTkLabel(line1, text="Saat").pack(side="left", padx=(10, 4))
+            tm = time_entry(line1, e.get("time", ""))
+            tm.pack(side="left")
+            day_vars = []
+            for i, d in enumerate(SHORT_DAYS):
+                v = ctk.BooleanVar(value=i in e.get("days", []))
+                ctk.CTkCheckBox(line1, text=d, variable=v, width=56, checkbox_width=18,
+                                checkbox_height=18).pack(side="left", padx=(6 if i == 0 else 0, 0))
+                day_vars.append(v)
+            line2 = ctk.CTkFrame(card, fg_color="transparent")
+            line2.pack(fill="x", padx=12, pady=(0, 10))
+            picker = SoundPicker(line2, self.app.player, e.get("sound", "builtin:gong"), allow_files=True)
+            picker.pack(side="left")
+            text = ctk.CTkEntry(line2, width=300, placeholder_text="Anons metni (isteğe bağlı)")
+            text.insert(0, e.get("text", ""))
+            text.pack(side="left", padx=8)
+            item = {"card": card, "en": en, "label": label, "time": tm, "days": day_vars, "picker": picker,
+                    "text": text, "repeat": e.get("repeat", 1)}
+
+            def remove():
+                card.destroy()
+                items.remove(item)
+            ctk.CTkButton(line2, text="Sil", width=60, fg_color=theme.DANGER, hover_color=theme.DANGER_HOVER,
+                          command=remove).pack(side="right")
+            items.append(item)
+
+        for e in cfg.get("extra_bells", []):
+            add(e)
+
+        btns = ctk.CTkFrame(f, fg_color="transparent")
+        btns.grid(row=2, column=0, sticky="w", pady=8, padx=4)
+        ctk.CTkButton(btns, text="+ Ek zil ekle", command=add).pack(side="left")
+        ctk.CTkButton(btns, text="Örnek: Pazartesi bayrak töreni", fg_color="transparent", border_width=1,
+                      text_color=theme.TEXT, command=lambda: add({
+                          "enabled": True, "time": "08:20", "days": [0], "label": "Bayrak Töreni",
+                          "sound": "builtin:kampana",
+                          "text": "Sevgili öğrenciler, bayrak töreni için okul bahçesinde toplanınız."})).pack(
+            side="left", padx=8)
+        ctk.CTkButton(btns, text="Örnek: Cuma haftayı kapatma", fg_color="transparent", border_width=1,
+                      text_color=theme.TEXT, command=lambda: add({
+                          "enabled": True, "time": "15:25", "days": [4], "label": "Bayrak Töreni (Cuma)",
+                          "sound": "builtin:kampana",
+                          "text": "Sevgili öğrenciler, haftayı kapatma töreni için hazırlanınız."})).pack(side="left")
+
+        def collect():
+            out = []
+            for it in items:
+                name = it["label"].get().strip() or "Ek zil"
+                try:
+                    tm = fmt_hm(parse_hm(it["time"].get()))
+                except ValueError:
+                    raise ValueError(f"Ek Ziller: «{name}» için saat SS:DD biçiminde olmalı (ör. 08:20).")
+                days = [i for i, v in enumerate(it["days"]) if v.get()]
+                if not days:
+                    raise ValueError(f"Ek Ziller: «{name}» için en az bir gün seçin.")
+                out.append({"enabled": bool(it["en"].get()), "time": tm, "days": days, "label": name,
+                            "sound": it["picker"].get(), "text": it["text"].get().strip(),
+                            "repeat": it["repeat"]})
+            cfg["extra_bells"] = out
+        self._collectors.append(collect)
+
+    def _tab_system(self, f):
+        b = self._card(f, "Yedekleme", "Ayarları bir dosyaya kaydedip başka bir bilgisayara aktarabilirsiniz.")
+        row = ctk.CTkFrame(b, fg_color="transparent")
+        row.grid(row=0, column=0, sticky="w")
+        ctk.CTkButton(row, text="Ayarları dışa aktar…", command=self._export).pack(side="left")
+        ctk.CTkButton(row, text="Ayarları içe aktar…", command=self._import).pack(side="left", padx=8)
+        ctk.CTkButton(row, text="Varsayılan ayarlara dön", fg_color=theme.DANGER, hover_color=theme.DANGER_HOVER,
+                      command=self._reset).pack(side="left", padx=8)
+
+        b = self._card(f, "Veri Klasörü")
+        ctk.CTkLabel(b, text=str(paths.data_dir()), anchor="w").grid(row=0, column=0, sticky="w")
+        ctk.CTkButton(b, text="Klasörü aç", width=110, command=lambda: _open_path(paths.data_dir())).grid(
+            row=0, column=1, padx=10, sticky="w")
+
+        b = self._card(f, "Kayıtlar", "Çalan ziller ve olası hatalar burada görünür.")
+        b.grid_columnconfigure(0, weight=1)
+        b.grid_columnconfigure(9, weight=0)
+        box = ctk.CTkTextbox(b, height=300, font=ctk.CTkFont(family="Consolas", size=12))
+        box.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(6, 0))
+
+        def load():
+            box.configure(state="normal")
+            box.delete("1.0", "end")
+            try:
+                with open(paths.log_file(), encoding="utf-8", errors="replace") as fh:
+                    lines = fh.readlines()[-300:]
+                box.insert("end", "".join(reversed(lines)))
+            except OSError:
+                box.insert("end", "Henüz kayıt yok.")
+            box.configure(state="disabled")
+        ctk.CTkButton(b, text="Yenile", width=90, command=load).grid(row=0, column=0, sticky="w")
+        load()
+
+    # -- yedekleme ----------------------------------------------------------
+
+    def _export(self):
+        if not self._collect():
+            return
+        path = filedialog.asksaveasfilename(parent=self, title="Ayarları kaydet", defaultextension=".json",
+                                            initialfile="okul_zili_ayarlar.json",
+                                            filetypes=[("Ayar dosyası", "*.json")])
+        if path:
+            config.export_to(self.cfg, path)
+            messagebox.showinfo("Dışa aktarıldı", "Ayarlar kaydedildi.", parent=self)
+
+    def _import(self):
+        path = filedialog.askopenfilename(parent=self, title="Ayar dosyası seçin",
+                                          filetypes=[("Ayar dosyası", "*.json")])
+        if not path:
+            return
+        try:
+            self.cfg = config.import_from(path)
+        except (OSError, ValueError) as exc:
+            messagebox.showerror("İçe aktarılamadı", f"Dosya okunamadı:\n{exc}", parent=self)
+            return
+        self.cfg["level"] = self.level
+        self._build_tabs(keep="Sistem")
+        messagebox.showinfo("İçe aktarıldı", "Ayarlar yüklendi. Uygulamak için «Kaydet»e basın.", parent=self)
+
+    def _reset(self):
+        if not messagebox.askyesno("Varsayılan ayarlar", "Tüm ayarlar varsayılan değerlere dönecek. Emin misiniz?",
+                                   icon="warning", parent=self):
+            return
+        self.cfg = config.default_config()
+        self.cfg["level"] = self.level
+        self._build_tabs(keep="Sistem")
+        messagebox.showinfo("Varsayılan ayarlar", "Varsayılan ayarlar yüklendi. Uygulamak için «Kaydet»e basın.",
+                            parent=self)
+
+    # -- kaydet / vazgeç ----------------------------------------------------
+
+    def _save(self):
+        if not self._collect():
+            return
+        bells = self.cfg["bells"]
+        if bells["ogrenci"]["sound"] == bells["ogretmen"]["sound"] and bells["ogrenci"]["sound"] != sounds.NO_SOUND:
+            if not messagebox.askyesno(
+                    "Aynı zil sesi", "Öğrenci zili ile öğretmen zili aynı sesi kullanıyor; ayırt etmek zor "
+                                     "olabilir.\n\nYine de kaydedilsin mi?", parent=self):
+                return
+        self.cfg["level"] = self.level
+        self.app.apply_config(self.cfg)
+        self.destroy()
+
+    def _cancel(self):
+        self.app.player.stop()
+        self.destroy()
+
+
+def _open_path(path):
+    if os.name == "nt":
+        os.startfile(path)  # noqa: S606
+    else:
+        subprocess.Popen(["open" if sys.platform == "darwin" else "xdg-open", str(path)])
