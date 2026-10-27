@@ -44,6 +44,23 @@ def length_seconds(sound_id: str):
     return None
 
 
+def part(sound_id: str):
+    """Kütüphanede bu ses için seçilmiş «zilde çalınacak bölüm»: (başlangıç, bitiş ya da None)."""
+    if sound_id and sound_id.startswith(library.PREFIX):
+        item = library.get_library().get(sound_id[len(library.PREFIX):])
+        if item:
+            try:
+                start = float(item.get("part_start") or 0.0)
+                end = item.get("part_end")
+                end = float(end) if end not in (None, "") else None
+                if end is not None and end <= start:
+                    end = None
+                return max(0.0, start), end
+            except (TypeError, ValueError):
+                pass
+    return 0.0, None
+
+
 def display_name(sound_id: str) -> str:
     if sound_id == NO_SOUND:
         return NO_SOUND_NAME

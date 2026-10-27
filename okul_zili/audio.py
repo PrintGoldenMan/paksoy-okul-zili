@@ -21,6 +21,7 @@ except ImportError as exc:
     _HAVE_PYGAME = False
 
 _mixer_lock = threading.Lock()
+MAX_FULL_SECONDS = 15 * 60   # «sonuna kadar» çalan ek ziller için güvenlik sınırı
 
 
 def _ensure_mixer() -> bool:
@@ -82,6 +83,11 @@ class Player:
         self.stop_preview()
         self._queue.put((self._gen, "sound", sound_id, duration))
 
+    def preview_file(self, path, start=0.0, part_end=None, duration=None) -> None:
+        """Bir dosyanın belirli bölümünü dinletir (kaydetmeden önce bölüm seçerken)."""
+        self.stop_preview()
+        self._queue.put((self._gen, "file", str(path), (start, part_end, duration)))
+
     def say(self, text: str, tts_cfg=None, preview=False) -> None:
         """Metni okur. tts_cfg verilirse kayıtlı anons ayarları yerine o kullanılır (deneme için)."""
         if preview:
@@ -99,14 +105,14 @@ class Player:
 
     def stop_preview(self) -> None:
         """Yalnızca ayarlar penceresinden başlatılan deneme seslerini durdurur; gerçek zillere dokunmaz."""
-        if self._current_kind in ("sound", "trysay"):
+        if self._current_kind in ("sound", "trysay", "file"):
             self.stop()
         else:
             pending = []
             try:
                 while True:
                     item = self._queue.get_nowait()
-                    if item[1] not in ("sound", "trysay"):
+                    if item[1] not in ("sound", "trysay", "file"):
                         pending.append(item)
             except queue.Empty:
                 pass
@@ -133,8 +139,15 @@ class Player:
                     path = sounds.resolve(a)
                     if path is None and not sounds.is_silent(a):
                         self._warning_beep(b or 3.5, gen)
-                    elif not self._play_file(path, cfg["master_volume"], gen, duration=b):
-                        self._warning_beep(b or 3.5, gen)
+                    else:
+                        part_start, part_end = sounds.part(a)
+                        if not self._play_file(path, cfg["master_volume"], gen, duration=b,
+                                               start=part_start, part_end=part_end):
+                            self._warning_beep(b or 3.5, gen)
+                elif kind == "file":
+                    self._set_state(True, "Bölüm dinleniyor")
+                    start, part_end, duration = b
+                    self._play_file(a, cfg["master_volume"], gen, duration=duration, start=start, part_end=part_end)
                 elif kind in ("say", "trysay"):
                     self._set_state(True, "Anons")
                     self._announce(cfg if b is None else dict(cfg, tts=b), a, gen)
@@ -161,9 +174,11 @@ class Player:
             # Ses seçilmemiş ya da kütüphaneden silinmiş: zil sessiz kalmasın.
             log.warning("Zil sesi bulunamadı (%s), Windows uyarı sesi çalınıyor", event.sound or "seçilmedi")
             self._warning_beep(event.duration, gen)
-        elif not self._play_file(path, volume, gen, duration=event.duration):
-            log.warning("Zil sesi çalınamadı, Windows uyarı sesi çalınıyor: %s", path)
-            self._warning_beep(event.duration, gen)
+        else:
+            part_start, part_end = sounds.part(event.sound)
+            if not self._play_file(path, volume, gen, duration=event.duration, start=part_start, part_end=part_end):
+                log.warning("Zil sesi çalınamadı, Windows uyarı sesi çalınıyor: %s", path)
+                self._warning_beep(event.duration, gen)
         if self._cancelled(gen):
             return
         if announce and event.tts and event.text:
@@ -192,9 +207,12 @@ class Player:
         volume = cfg["master_volume"] * cfg["tts"].get("volume", 100) / 100
         self._play_file(path, volume, gen)
 
-    def _play_file(self, path, volume, gen, duration=None) -> bool:
-        """Dosyayı çalar; çalınamazsa False döndürür. duration (saniye) verilirse ses o süre
-        boyunca çalar: kısa sesler başa sarılarak tekrarlanır, uzun sesler sonunda yumuşakça kısılır."""
+    def _play_file(self, path, volume, gen, duration=None, start=0.0, part_end=None) -> bool:
+        """Dosyayı çalar; çalınamazsa False döndürür.
+
+        start / part_end: şarkının çalınacak bölümü (saniye; part_end None ise dosyanın sonuna kadar).
+        duration verilirse ses tam o süre çalar: bölüm kısaysa başa (bölümün başına) sarılarak tekrarlanır,
+        uzunsa sonunda yumuşakça kısılır. duration None ise bölüm bir kez, sonuna kadar çalınır."""
         if path is None or self._cancelled(gen):
             return True
         if not _ensure_mixer():
@@ -207,33 +225,47 @@ class Player:
                 _reset_mixer()
             return False
         base = max(0.0, min(1.0, volume / 100))
-        pygame.mixer.music.set_volume(base)
-        try:
-            if duration:
-                pygame.mixer.music.play(loops=-1)
-                end = time.monotonic() + duration
-                fade_s = min(0.5, duration * 0.2)
+        start = max(0.0, float(start or 0.0))
+        part_len = (part_end - start) if part_end and part_end > start else None
+        total = duration if duration else (part_len or MAX_FULL_SECONDS)
+        fade_s = min(0.5, total * 0.2) if (duration or part_len) else 0.0
+
+        def begin():
+            pygame.mixer.music.set_volume(base)
+            if start > 0:
+                pygame.mixer.music.play(start=start)
             else:
                 pygame.mixer.music.play()
-                end = None
+            return time.monotonic()
+
+        try:
+            t0 = seg_t0 = begin()
         except Exception as exc:  # noqa: BLE001
             log.error("Ses çalınamadı, ses sistemi yeniden başlatılacak: %s", exc)
             _reset_mixer()
             return False
-        while pygame.mixer.music.get_busy():
+        end = t0 + total
+        while True:
             time.sleep(0.02)
             if self._cancelled(gen):
-                pygame.mixer.music.stop()
                 break
-            if end is not None:
-                left = end - time.monotonic()
-                if left <= 0:
-                    pygame.mixer.music.stop()   # süre doldu: kesin olarak dur
+            now = time.monotonic()
+            left = end - now
+            if left <= 0:
+                break   # süre doldu: kesin olarak dur
+            if fade_s and left <= fade_s:
+                # Sonda sesi elle kısarak yumuşak bitiş (fadeout süresi her sistemde kesin değil)
+                pygame.mixer.music.set_volume(base * left / fade_s)
+            segment_over = not pygame.mixer.music.get_busy() or (part_len and now - seg_t0 >= part_len)
+            if segment_over:
+                if duration and left > 0.05:
+                    seg_t0 = begin()   # bölüm bitti ama zil süresi dolmadı: bölümün başından tekrar
+                    if fade_s and left <= fade_s:
+                        pygame.mixer.music.set_volume(base * left / fade_s)
+                else:
                     break
-                if left <= fade_s:
-                    # Sonda sesi elle kısarak yumuşak bitiş (fadeout süresi her sistemde kesin değil)
-                    pygame.mixer.music.set_volume(base * left / fade_s)
         try:
+            pygame.mixer.music.stop()
             pygame.mixer.music.unload()
         except Exception:  # noqa: BLE001
             pass

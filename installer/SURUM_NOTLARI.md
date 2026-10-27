@@ -29,6 +29,13 @@ Her hafta (ya da her gün / her ay) farklı bir şarkı çalması için Ayarlar 
 Ses seçilmemiş zil sessiz kalmaz, Windows uyarı sesi çalar; ana ekranda sarı uyarı görünür.
 Oynatma listesi bağlantısı yapıştırılırsa program iki kez uyarır.
 
+### Bu sürümde yeni (1.2.0)
+- Pencere kapatılınca program saatin yanındaki simgede çalışmaya devam eder; beklenmedik kapanmada kendiliğinden açılır.
+- Okul saatlerinde bilgisayar uykuya geçmez. Windows sesi kapalıysa ya da saat yanlışsa uyarı verilir.
+- «Güncelleme var» düğmesiyle program kendini günceller.
+- Tam yedek (ayarlar + sesler), MEB 2026-2027 çalışma takvimi, yarım günlük tatiller.
+- Kütüphanede her ses için zilde çalınacak bölüm; ek zillerde «sonuna kadar çal» (İstiklal Marşı için).
+
 ### Önemli
 - Zil bilgisayarında **uyku modunu kapatın**. Program yalnızca açıkken zil çalar.
 - Hoparlörün bağlı ve sesin açık olduğundan emin olun; Ayarlar → Zil Sesleri → «Dinle» ile deneyin.

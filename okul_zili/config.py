@@ -119,6 +119,12 @@ DEFAULTS = {
     "profiles": {},
     "profile_dates": [],   # [{"date": "2026-11-10", "profile": "Kısaltılmış Ders"}]
     "grace_seconds": 45,
+    "tray_on_close": True,       # pencere kapatılınca sistem tepsisine küçült (program çalışmaya devam eder)
+    "watchdog": True,            # program beklenmedik şekilde kapanırsa 5 dk içinde yeniden başlat (Windows)
+    "keep_awake": True,          # okul saatlerinde bilgisayarın uykuya geçmesini engelle
+    "check_updates": True,       # yeni sürüm çıkınca haber ver
+    "check_clock": True,         # internet varsa bilgisayar saatini denetle
+    "check_volume": True,        # Windows sesi kapalı/çok kısıksa uyar
     "prepare_announcements": True,
     "skip_date": None,  # "Bugün zilleri kapat" seçildiğinde o günün tarihi
     "autostart": False,

@@ -10,7 +10,7 @@ from tkinter import filedialog, messagebox
 from .. import downloader, library, rotation, sounds
 from ..config import BELL_NAMES, BELL_TYPES
 from . import theme
-from .widgets import Card, ask_safely, fit_to_screen
+from .widgets import Card, ask_safely, center_over, fit_to_screen
 
 log = logging.getLogger(__name__)
 
@@ -181,6 +181,10 @@ class LibraryWindow(ctk.CTkToplevel):
                 row=0, column=1, sticky="ew", pady=(6, 0))
             used = self._bells_using(sid)
             info = _fmt_duration(item.get("duration"))
+            part_start, part_end = sounds.part(sid)
+            if part_start or part_end:
+                end_text = downloader.fmt_time(part_end) if part_end else "son"
+                info += f"   ·   🎯 Zilde çalan bölüm: {downloader.fmt_time(part_start)}–{end_text}"
             if used:
                 info += "   ·   Kullanan: " + ", ".join(used)
             ctk.CTkLabel(row, text=info, anchor="w", text_color=theme.MUTED, font=theme.font(12)).grid(
@@ -192,6 +196,10 @@ class LibraryWindow(ctk.CTkToplevel):
                 menu.set("Zile ata…")
                 menu.grid(row=0, column=col, rowspan=2, padx=4)
                 col += 1
+            ctk.CTkButton(row, text="🎯 Bölüm", width=86, fg_color="transparent", border_width=1,
+                          text_color=theme.TEXT, command=lambda i=item: self._choose_part(i)).grid(
+                row=0, column=col, rowspan=2, padx=4)
+            col += 1
             ctk.CTkButton(row, text="Adını değiştir", width=110, fg_color="transparent", border_width=1,
                           text_color=theme.TEXT, command=lambda i=item: self._rename(i)).grid(
                 row=0, column=col, rowspan=2, padx=4)
@@ -219,6 +227,9 @@ class LibraryWindow(ctk.CTkToplevel):
         self._show_status(f"✓ {bell_name} artık «{sounds.display_name(sound_id)}» sesini çalacak.", theme.SUCCESS)
         self.assign_bar.grid_remove()
         self.refresh()
+
+    def _choose_part(self, item):
+        PartDialog(self, self.app, item, on_saved=self.refresh)
 
     def _rename(self, item):
         dlg = ctk.CTkInputDialog(title="Adını değiştir", text=f"Yeni ad:\n(şu anki: {item['title']})")
@@ -568,3 +579,97 @@ class LibraryWindow(ctk.CTkToplevel):
         self.destroy()
         if self.on_close:
             self.on_close()
+
+
+class PartDialog(ctk.CTkToplevel):
+    """Bir sesin zilde çalınacak bölümünü seçme (ör. şarkının nakaratı 1:05–1:20)."""
+
+    def __init__(self, master, app, item, on_saved=None):
+        super().__init__(master)
+        self.app = app
+        self.item = item
+        self.sid = library.PREFIX + item["id"]
+        self.on_saved = on_saved
+        self.title("Çalınacak bölüm")
+        self.resizable(False, False)
+        self.configure(fg_color=theme.CARD_BG)
+        self.transient(master)
+        self.protocol("WM_DELETE_WINDOW", self._close)
+        ctk.CTkLabel(self, text="🎯  Zilde çalınacak bölüm", font=theme.font(18, "bold")).pack(
+            anchor="w", padx=22, pady=(18, 2))
+        ctk.CTkLabel(self, text=item["title"], text_color=theme.MUTED).pack(anchor="w", padx=22)
+        ctk.CTkLabel(self, text=f"Sesin uzunluğu: {_fmt_duration(item.get('duration'))}. Zil bu bölümün başından "
+                                "çalar. Normal zillerde bölüm, çalma süresi dolana kadar tekrarlanır; «sonuna kadar» "
+                                "çalan ek zillerde bölüm bir kez baştan sona çalınır.",
+                     wraplength=440, justify="left", font=theme.font(12)).pack(anchor="w", padx=22, pady=(8, 10))
+        row = ctk.CTkFrame(self, fg_color="transparent")
+        row.pack(anchor="w", padx=22)
+        start, end = sounds.part(self.sid)
+        ctk.CTkLabel(row, text="Başlangıç").pack(side="left")
+        self.start_e = ctk.CTkEntry(row, width=90, justify="center", placeholder_text="0:00")
+        self.start_e.pack(side="left", padx=6)
+        ctk.CTkLabel(row, text="–  Bitiş").pack(side="left")
+        self.end_e = ctk.CTkEntry(row, width=90, justify="center", placeholder_text="sonuna kadar")
+        self.end_e.pack(side="left", padx=6)
+        if start:
+            self.start_e.insert(0, downloader.fmt_time(start))
+        if end:
+            self.end_e.insert(0, downloader.fmt_time(end))
+        ctk.CTkLabel(self, text="dakika:saniye (ör. 1:05). Bitiş boş bırakılırsa sesin sonuna kadar.",
+                     text_color=theme.MUTED, font=theme.font(12)).pack(anchor="w", padx=22, pady=(4, 0))
+        self.msg = ctk.CTkLabel(self, text="", text_color=theme.DANGER, wraplength=440, justify="left")
+        self.msg.pack(anchor="w", padx=22)
+        btns = ctk.CTkFrame(self, fg_color="transparent")
+        btns.pack(fill="x", padx=22, pady=(10, 18))
+        ctk.CTkButton(btns, text="▶ Bölümü dinle", width=130, command=self._preview).pack(side="left")
+        ctk.CTkButton(btns, text="Baştan çalsın", width=110, fg_color="transparent", border_width=1,
+                      text_color=theme.TEXT, command=self._reset).pack(side="left", padx=8)
+        ctk.CTkButton(btns, text="Kaydet", width=100, fg_color=theme.SUCCESS, hover_color=theme.SUCCESS_HOVER,
+                      command=self._save).pack(side="right")
+        self.after(50, lambda: (center_over(self), self.lift(), self.start_e.focus_set()))
+
+    def _read(self):
+        start_text = self.start_e.get().strip() or "0"
+        end_text = self.end_e.get().strip()
+        duration = self.item.get("duration")
+        start = downloader.parse_time(start_text)
+        end = None
+        if end_text:
+            start, end = downloader.parse_section(start_text, end_text, duration=duration)
+        elif duration and start >= duration:
+            raise downloader.DownloadError(f"Bu ses {downloader.fmt_time(duration)} uzunluğunda; başlangıç "
+                                           "bundan önce olmalı.")
+        return start, end
+
+    def _preview(self):
+        try:
+            start, end = self._read()
+        except downloader.DownloadError as exc:
+            self.msg.configure(text=str(exc))
+            return
+        self.msg.configure(text="")
+        # Kaydetmeden dinletmek için geçici olarak kütüphanedeki bölüm ayarı kullanılmaz; doğrudan çalınır.
+        path = sounds.resolve(self.sid)
+        if path:
+            length = min((end - start) if end else 20.0, 30.0)
+            self.app.player.preview_file(path, start=start, part_end=end, duration=length)
+
+    def _reset(self):
+        self.start_e.delete(0, "end")
+        self.end_e.delete(0, "end")
+        self.msg.configure(text="")
+
+    def _save(self):
+        try:
+            start, end = self._read()
+        except downloader.DownloadError as exc:
+            self.msg.configure(text=str(exc))
+            return
+        library.get_library().set_part(self.item["id"], start, end)
+        self._close()
+        if self.on_saved:
+            self.on_saved()
+
+    def _close(self):
+        self.app.player.stop_preview()
+        self.destroy()

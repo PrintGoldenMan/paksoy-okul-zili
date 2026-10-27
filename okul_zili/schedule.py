@@ -107,8 +107,21 @@ def holiday_name(cfg: dict, date: dt.date):
     iso = date.isoformat()
     for h in cfg.get("holidays", []):
         start = h.get("start") or ""
-        if start and start <= iso <= (h.get("end") or start):
+        if start and start <= iso <= (h.get("end") or start) and not h.get("from"):
             return h.get("name") or "Tatil"
+    return None
+
+
+def half_day(cfg: dict, date: dt.date):
+    """Yarım günlük tatil (ör. 28 Ekim öğleden sonra): (ad, dakika) ya da None."""
+    iso = date.isoformat()
+    for h in cfg.get("holidays", []):
+        start = h.get("start") or ""
+        if start and start <= iso <= (h.get("end") or start) and h.get("from"):
+            try:
+                return h.get("name") or "Yarım gün tatil", parse_hm(h["from"])
+            except (ValueError, TypeError):
+                continue
     return None
 
 
@@ -194,7 +207,9 @@ def extra_events(cfg: dict, weekday: int) -> list:
             minute=minute, kind="ek", label=e.get("label") or "Ek Zil", note="Ek zil",
             sound=e.get("sound", ""), text=text,
             tts=bool(text) and cfg["tts"].get("enabled", False),
-            duration=ring_seconds(e.get("duration")), volume=int(e.get("volume", 100)), extra=e,
+            # «Sonuna kadar çal» seçiliyse süre sınırı yok (None): ses ya da seçilen bölümü bir kez tam çalar.
+            duration=None if e.get("full") else ring_seconds(e.get("duration")),
+            volume=int(e.get("volume", 100)), extra=e,
         ))
     return out
 
@@ -212,10 +227,13 @@ def events_for_date(cfg: dict, date: dt.date) -> list:
     events += extra_events(cfg, date.weekday())
     skip = cfg.get("skip_today") or {}
     skipped = skip.get("ids", []) if skip.get("date") == date.isoformat() else []
+    half = half_day(cfg, date)
     for e in events:
         if e.off:
             continue
-        if is_disabled(cfg, date.weekday(), e.bell_id):
+        if half and e.minute >= half[1]:
+            e.off = "Tatil (yarım gün)"
+        elif is_disabled(cfg, date.weekday(), e.bell_id):
             e.off = "Kapalı"
         elif e.bell_id in skipped:
             e.off = "Bugün kapalı"

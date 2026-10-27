@@ -58,8 +58,19 @@ Type: dirifempty; Name: "{app}"
 
 [Run]
 Filename: "{app}\{#AppExe}"; Description: "Okul Zili programını şimdi başlat"; Flags: nowait postinstall skipifsilent
+; Program kendini güncellediğinde (sessiz kurulum, /RELAUNCH=1) kurulumdan sonra yeniden açılır.
+Filename: "{app}\{#AppExe}"; Parameters: "--oz-restart"; Flags: nowait; Check: ShouldRelaunch
+
+[UninstallRun]
+; «Kapanırsa yeniden başlat» zamanlanmış görevi kaldırılır.
+Filename: "{sys}\schtasks.exe"; Parameters: "/Delete /TN ""OkulZili Bekci"" /F"; Flags: runhidden; RunOnceId: "BekciSil"
 
 [Code]
+function ShouldRelaunch: Boolean;
+begin
+  Result := ExpandConstant('{param:RELAUNCH|0}') = '1';
+end;
+
 // Otomatik başlatma program içinden de açılmış olabilir; kaldırırken her durumda silinir.
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 begin

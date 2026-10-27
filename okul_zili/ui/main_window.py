@@ -3,12 +3,14 @@
 import datetime as dt
 import logging
 import os
+import queue
+import threading
 import time
 
 import customtkinter as ctk
 from tkinter import messagebox
 
-from .. import APP_NAME, __version__, config, paths, rotation, schedule, sounds
+from .. import APP_NAME, __version__, config, paths, rotation, schedule, sounds, system, updater
 from ..config import BELL_NAMES, LEVEL_NAMES
 from ..turkish import long_date
 from . import theme
@@ -46,6 +48,8 @@ class MainWindow(ctk.CTk):
         self._build_right()
         self._build_statusbar()
         self._layout(compact=False)
+        self.ui_jobs = queue.Queue()
+        self.after(200, self._poll_background)
         self.refresh_all()
         self._tick()
 
@@ -63,13 +67,16 @@ class MainWindow(ctk.CTk):
                      anchor="w").grid(row=1, column=1, sticky="nw", pady=(0, 10))
         self.level_btn = ctk.CTkButton(bar, text="", width=150, height=34, fg_color="#2c4f80",
                                        hover_color="#365e96", command=self.open_level_dialog)
-        self.level_btn.grid(row=0, column=2, rowspan=2, padx=6)
+        self.update_btn = ctk.CTkButton(bar, text="", width=190, height=34, font=theme.font(13, "bold"),
+                                        fg_color=theme.SUCCESS, hover_color=theme.SUCCESS_HOVER,
+                                        command=self.open_update)
+        self.level_btn.grid(row=0, column=3, rowspan=2, padx=6)   # 2. sütun güncelleme düğmesine ayrılmış
         ctk.CTkButton(bar, text="🎵  Kütüphane", width=140, height=34, font=theme.font(14, "bold"),
                       fg_color="#2c4f80", hover_color="#365e96",
-                      command=self.open_library).grid(row=0, column=3, rowspan=2, padx=6)
+                      command=self.open_library).grid(row=0, column=4, rowspan=2, padx=6)
         ctk.CTkButton(bar, text="⚙  Ayarlar", width=130, height=34, font=theme.font(14, "bold"),
                       fg_color="#ffffff", text_color="#1f3b63", hover_color="#dfe7f2",
-                      command=self.open_settings).grid(row=0, column=4, rowspan=2, padx=(6, 18))
+                      command=self.open_settings).grid(row=0, column=5, rowspan=2, padx=(6, 18))
 
     def _set_icon(self):
         try:
@@ -158,6 +165,15 @@ class MainWindow(ctk.CTk):
         elif cfg.get("skip_date") == now.date().isoformat():
             text, btn, self._banner_kind = ("⚠  BUGÜN ZİLLER KAPALI – yarın otomatik olarak açılır",
                                             "Bugün de çalsın", "skip")
+        elif self._volume_problem(cfg):
+            text, btn = self._volume_problem(cfg), "Ses ayarlarını aç"
+            self._banner_kind = "volume"
+        elif cfg.get("check_clock", True) and self.app.clock.offset is not None and abs(self.app.clock.offset) > 60:
+            off = self.app.clock.offset
+            amount = f"{abs(off) / 60:.0f} dakika" if abs(off) >= 90 else f"{abs(off):.0f} saniye"
+            text = (f"⏰  Bilgisayarın saati {amount} {'geri' if off > 0 else 'ileri'} – ziller yanlış zamanda "
+                    f"çalabilir")
+            btn, danger, self._banner_kind = "Saati düzelt", False, "clock"
         else:
             missing = [BELL_NAMES[k] for k in config.BELL_TYPES
                        if sounds.is_missing(rotation.effective_sound(cfg["bells"][k]))]
@@ -186,6 +202,13 @@ class MainWindow(ctk.CTk):
         kind = getattr(self, "_banner_kind", "")
         if kind == "sound":
             self.open_library()
+            return
+        if kind == "volume":
+            system.open_sound_settings()
+            return
+        if kind == "clock":
+            system.open_time_settings()
+            self.app.clock.check_now()
             return
         if kind == "auto":
             self.app.update_config(auto_ring=True)
@@ -394,9 +417,31 @@ class MainWindow(ctk.CTk):
         except Exception:  # noqa: BLE001
             log.exception("Ana ekran güncellenemedi")
 
+    def _volume_problem(self, cfg):
+        if not cfg.get("check_volume", True):
+            return None
+        state = self.app.volume.state
+        if not state:
+            return None
+        if not state.get("device"):
+            return "🔇  Hoparlör / ses aygıtı bulunamadı – ziller DUYULMAZ"
+        if state.get("muted"):
+            return "🔇  Bilgisayarın sesi KAPALI (sessiz) – ziller DUYULMAZ"
+        if state.get("level", 1) < 0.15:
+            return f"🔈  Bilgisayarın ses düzeyi çok düşük (%{state['level'] * 100:.0f}) – ziller duyulmayabilir"
+        return None
+
     def _update(self, now):
         self._check_size()
         self.app.check_rotation(now)
+        if self.app.cfg.get("keep_awake", True) and schedule.is_school_day(self.app.cfg, now.date()):
+            system.set_keep_awake(system.keep_awake_needed(self.app.scheduler.today_events(), now))
+        else:
+            system.set_keep_awake(False)
+        latest = self.app.updates.latest
+        if latest and not self.update_btn.winfo_ismapped():
+            self.update_btn.configure(text=f"⬆  Güncelleme var ({latest['version']})")
+            self.update_btn.grid(row=0, column=2, rowspan=2, padx=6)
         cfg = self.app.cfg
         self.clock_lbl.configure(text=now.strftime("%H:%M:%S"))
         self.date_lbl.configure(text=long_date(now.date()))
@@ -457,7 +502,7 @@ class MainWindow(ctk.CTk):
     def flash(self, text, seconds=4):
         """Durum çubuğunda kısa süreli bilgi gösterir (ör. «Ayarlar kaydedildi»)."""
         self._flash_text = text
-        self._flash_until = time.monotonic() + seconds
+        self._flash_until = time.monotonic() + seconds if text else 0.0
         self._update_statusbar(self.app.cfg, dt.datetime.now())
 
     def _update_statusbar(self, cfg, now):
@@ -537,12 +582,96 @@ class MainWindow(ctk.CTk):
         if text and text.strip():
             self.app.player.say(text.strip())
 
+    # -- sistem tepsisi ----------------------------------------------------------
+
+    def _poll_background(self):
+        """Arka plan iş parçacıklarından (tepsi menüsü, güncelleme) gelen işleri ana iş parçacığında yapar."""
+        try:
+            while True:
+                self.ui_jobs.get_nowait()()
+        except queue.Empty:
+            pass
+        except Exception:  # noqa: BLE001
+            log.exception("Arka plan işi başarısız")
+        tray = self.app.tray
+        if tray is not None:
+            try:
+                while True:
+                    cmd = tray.commands.get_nowait()
+                    if cmd == "show":
+                        self.show_window()
+                    elif cmd == "silence":
+                        self.app.player.stop()
+                    elif cmd == "quit":
+                        self.show_window()
+                        self._confirm_quit()
+            except queue.Empty:
+                pass
+        self.after(200, self._poll_background)
+
+    def show_window(self):
+        self.deiconify()
+        self.lift()
+        self.focus_force()
+
     def _on_close(self):
+        tray = self.app.tray
+        if self.app.cfg.get("tray_on_close", True) and tray is not None and tray.available:
+            # Pencere gizlenir; program ve ziller çalışmaya devam eder.
+            self.withdraw()
+            if not getattr(self, "_tray_hint_shown", False):
+                tray.notify("Okul Zili arka planda çalışmaya devam ediyor; ziller çalacak. Kapatmak için saatin "
+                            "yanındaki zil simgesine sağ tıklayıp «Programı kapat»ı seçin.")
+                self._tray_hint_shown = True
+            return
+        self._confirm_quit()
+
+    def _confirm_quit(self):
         if self.app.cfg.get("confirm_exit", True) and not messagebox.askyesno(
                 "Programı kapat",
                 "Program kapatılırsa ziller ÇALMAZ.\n\nYine de kapatmak istiyor musunuz?",
                 icon="warning", parent=self):
             return
-        log.info("Program kapatıldı")
-        self.app.player.stop()
-        self.destroy()
+        self.app.quit()
+
+    # -- güncelleme ----------------------------------------------------------------
+
+    def open_update(self):
+        latest = self.app.updates.latest
+        if not latest:
+            return
+        nxt = self.app.scheduler.next_event()
+        if nxt is not None:
+            now = dt.datetime.now()
+            secs = nxt.minute * 60 - (now.hour * 3600 + now.minute * 60 + now.second)
+            if 0 <= secs < 180:
+                messagebox.showinfo("Güncelleme", "Birkaç dakika içinde zil çalacak. Lütfen zil çaldıktan sonra "
+                                                  "güncelleyin.", parent=self)
+                return
+        notes = (latest.get("notes") or "").strip()
+        if len(notes) > 700:
+            notes = notes[:700].rsplit("\n", 1)[0] + "\n…"
+        if not messagebox.askyesno(
+                "Yeni sürüm", f"Okul Zili {latest['version']} yayınlandı (şu anki: {__version__}).\n\n"
+                              f"Güncelle'ye basarsanız yeni sürüm indirilir, program kapanıp kurulur ve kendiliğinden "
+                              f"yeniden açılır (yaklaşık 1 dakika). Ayarlar ve sesler korunur.\n\n{notes}\n\n"
+                              f"Şimdi güncellensin mi?", parent=self):
+            return
+        self.flash("⬇  Güncelleme indiriliyor…", seconds=120)
+        self.update_btn.configure(state="disabled", text="⬇  İndiriliyor…")
+
+        def work():
+            try:
+                launched = updater.prepare_and_launch(latest)
+                self.ui_jobs.put(lambda: self.app.quit_for_update() if launched else self._update_done(None))
+            except Exception as exc:  # noqa: BLE001
+                log.exception("Güncelleme başarısız")
+                self.ui_jobs.put(lambda err=exc: self._update_done(err))
+        threading.Thread(target=work, daemon=True).start()
+
+    def _update_done(self, error):
+        self.update_btn.configure(state="normal", text=f"⬆  Güncelleme var ({self.app.updates.latest['version']})")
+        if error:
+            messagebox.showerror("Güncelleme", f"Güncelleme indirilemedi. İnternet bağlantısını kontrol edip "
+                                               f"tekrar deneyin.\n\n({error})", parent=self)
+        self.flash("")

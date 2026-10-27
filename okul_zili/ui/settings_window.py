@@ -19,7 +19,7 @@ import sys
 import customtkinter as ctk
 from tkinter import filedialog, messagebox
 
-from .. import autostart, config, library, paths, rotation, schedule, sounds, tts
+from .. import __version__, autostart, backup, config, library, meb_takvim, paths, rotation, schedule, sounds, system, tts
 from ..config import (BELL_NAMES, BELL_TYPES, DEFAULT_RING_SECONDS, LEVEL_DESCRIPTIONS, LEVEL_NAMES, LEVELS,
                       MAX_RING_SECONDS, MIN_RING_SECONDS, ring_seconds)
 from ..schedule import fmt_hm, parse_hm
@@ -90,6 +90,8 @@ class SoundPicker(ctk.CTkFrame):
                 return
 
     def preview_duration(self):
+        if getattr(self, "full_length", False):
+            return 30.0   # «sonuna kadar» çalan zil dinlenirken ilk 30 saniye
         if self.duration_spin is not None:
             try:
                 return self.duration_spin.get()
@@ -363,7 +365,8 @@ class SettingsWindow(ctk.CTkToplevel):
         self._collectors = []
         self._pickers = []
         self.level_desc.configure(text=f"{LEVEL_NAMES[self.level]}: {LEVEL_DESCRIPTIONS[self.level]}")
-        self.tabs = ctk.CTkTabview(self, fg_color=theme.WINDOW_BG, segmented_button_selected_color=theme.ACCENT)
+        self.tabs = ctk.CTkTabview(self, fg_color=theme.WINDOW_BG, segmented_button_selected_color=theme.ACCENT,
+                                   command=lambda: self._ensure_built(self.tabs.get()))
         self.tabs.pack(fill="both", expand=True, padx=12)
         self.tabs._segmented_button.configure(font=theme.font(13, "bold"), height=34)
         if self.level == "kolay":
@@ -379,14 +382,28 @@ class SettingsWindow(ctk.CTkToplevel):
             pages += [("Zil Listesi", self._tab_bell_list), ("Programlar", self._tab_profiles)]
         if self._at_least("uzman"):
             pages += [("Sistem", self._tab_system)]
-        for name, builder in pages:
-            tab = self.tabs.add(name)
-            frame = ctk.CTkScrollableFrame(tab, fg_color="transparent")
-            frame.pack(fill="both", expand=True)
-            frame.grid_columnconfigure(0, weight=1)
-            builder(frame)
-        if keep and keep in [p[0] for p in pages]:
-            self.tabs.set(keep)
+        # Sekmeler ilk açıldıklarında çizilir (pencere hızlı açılsın); açılmayan sekmenin ayarlarına dokunulmaz.
+        self._pages = dict(pages)
+        self._built = set()
+        plain_set = self.tabs.set
+        self.tabs.set = lambda name: (plain_set(name), self._ensure_built(name))
+        for name, _ in pages:
+            self.tabs.add(name)
+        self.tabs.set(keep if keep in self._pages else pages[0][0])
+
+    def _ensure_built(self, name):
+        if name in getattr(self, "_built", set()) or name not in self._pages:
+            return
+        baseline = getattr(self, "_baseline", None)
+        unchanged = baseline is not None and self._snapshot() == baseline   # ayrıca diğer sekmelerdeki girişleri alır
+        frame = ctk.CTkScrollableFrame(self.tabs.tab(name), fg_color="transparent")
+        frame.pack(fill="both", expand=True)
+        frame.grid_columnconfigure(0, weight=1)
+        self._pages[name](frame)
+        self._built.add(name)
+        if unchanged:
+            # Yeni sekmenin kendi düzenlemeleri (ör. boş alanların varsayılanları) değişiklik sayılmasın.
+            self._baseline = self._snapshot()
 
     def _open_library(self):
         """Kütüphaneyi açar; kapanınca ses seçim kutuları yeni seslerle güncellenir."""
@@ -501,12 +518,16 @@ class SettingsWindow(ctk.CTkToplevel):
         cb.grid(row=0, column=0, columnspan=3, sticky="w", pady=4)
         if not autostart.supported():
             cb.configure(state="disabled", text=cb.cget("text") + " – yalnızca Windows'ta")
+        tray_var = ctk.BooleanVar(value=cfg.get("tray_on_close", True))
+        ctk.CTkCheckBox(b, text="Pencere kapatılınca program saatin yanındaki simgede çalışmaya devam etsin (önerilir)",
+                        variable=tray_var).grid(row=1, column=0, columnspan=3, sticky="w", pady=4)
 
         self._hint(f, "Ders saatlerini veya zil seslerini değiştirmek için yukarıdan «Basit» düzeyini seçin.")
 
         def collect():
             cfg["master_volume"] = int(vol.get())
             cfg["autostart"] = bool(auto_var.get())
+            cfg["tray_on_close"] = bool(tray_var.get())
             try:
                 seconds = dur.get()
             except ValueError as exc:
@@ -534,10 +555,72 @@ class SettingsWindow(ctk.CTkToplevel):
         cb.grid(row=0, column=0, columnspan=3, sticky="w", pady=4)
         if not autostart.supported():
             cb.configure(state="disabled", text=cb.cget("text") + " – yalnızca Windows'ta")
+        toggles = [
+            ("tray_on_close", "Pencere kapatılınca program kapanmasın, saatin yanındaki simgede (sistem tepsisi) "
+                              "çalışmaya devam etsin (önerilir)", True),
+            ("watchdog", "Program beklenmedik şekilde kapanırsa 5 dakika içinde kendiliğinden yeniden açılsın "
+                         "(önerilir)", system.watchdog_supported()),
+            ("keep_awake", "Okul saatlerinde bilgisayar uyku moduna geçmesin (önerilir)", True),
+        ]
+        toggle_vars = {}
+        r = 1
+        for key, text, supported in toggles:
+            var = ctk.BooleanVar(value=cfg.get(key, True))
+            box = ctk.CTkCheckBox(b, text=text, variable=var)
+            box.grid(row=r, column=0, columnspan=3, sticky="w", pady=4)
+            if not supported:
+                box.configure(state="disabled", text=text + " – yalnızca kurulu Windows programında")
+            toggle_vars[key] = var
+            r += 1
+        self._hint(b, "Program tamamen kapatılmak istenirse saatin yanındaki zil simgesine sağ tıklayıp "
+                      "«Programı kapat» seçilir. Bilerek kapatılan program kendiliğinden yeniden açılmaz.", row=r)
+        r += 1
         exit_var = ctk.BooleanVar(value=cfg.get("confirm_exit", True))
         if self._at_least("uzman"):
             ctk.CTkCheckBox(b, text="Program kapatılırken onay iste", variable=exit_var).grid(
-                row=1, column=0, columnspan=3, sticky="w", pady=4)
+                row=r, column=0, columnspan=3, sticky="w", pady=4)
+
+        b = self._card(f, "Denetimler", "Zillerin duyulmamasına ya da yanlış saatte çalmasına yol açabilecek "
+                                        "durumlarda ana ekranda uyarı gösterilir.")
+        checks = [("check_volume", "Bilgisayarın sesi kapalı ya da çok kısıksa uyar"),
+                  ("check_clock", "Bilgisayarın saatini internet saatiyle karşılaştır (internet varsa)"),
+                  ("check_updates", "Programın yeni sürümü çıkınca haber ver")]
+        for r, (key, text) in enumerate(checks):
+            var = ctk.BooleanVar(value=cfg.get(key, True))
+            ctk.CTkCheckBox(b, text=text, variable=var).grid(row=r, column=0, columnspan=3, sticky="w", pady=4)
+            toggle_vars[key] = var
+        status = ctk.CTkLabel(b, text="", text_color=theme.MUTED, justify="left", anchor="w")
+        status.grid(row=len(checks), column=0, columnspan=2, sticky="w", pady=(8, 0))
+
+        def show_status():
+            clock = self.app.clock.offset
+            if clock is None:
+                clock_text = "Saat: henüz denetlenemedi (internet bağlantısı yok olabilir)"
+            elif abs(clock) <= 60:
+                clock_text = f"Saat: doğru (internet saatiyle fark {abs(clock):.1f} sn)".replace(".", ",")
+            else:
+                clock_text = f"Saat: {abs(clock):.0f} saniye {'geri' if clock > 0 else 'ileri'}!"
+            latest = self.app.updates.latest
+            ver = f"Sürüm: {__version__}" + (f" – yeni sürüm var: {latest['version']}" if latest else "")
+            status.configure(text=f"{clock_text}\n{ver}")
+        show_status()
+
+        def check_now():
+            self.app.clock.check_now()
+            self.app.updates.check_now()
+            status.configure(text="Denetleniyor…")
+            self.after(6000, lambda: self.winfo_exists() and show_status())
+        ctk.CTkButton(b, text="Şimdi denetle", width=120, command=check_now).grid(
+            row=len(checks), column=2, sticky="e", padx=8)
+
+        b = self._card(f, "Tam Yedek", "Ayarlar ve kütüphanedeki bütün sesler tek bir dosyaya kaydedilir. Yeni bir "
+                                       "bilgisayara geçerken ya da bilgisayar sıfırlanınca her şey bu dosyadan "
+                                       "geri yüklenir.")
+        row = ctk.CTkFrame(b, fg_color="transparent")
+        row.grid(row=0, column=0, sticky="w")
+        ctk.CTkButton(row, text="💾  Tam yedek al…", width=170, command=self._full_backup).pack(side="left")
+        ctk.CTkButton(row, text="Tam yedekten geri yükle…", width=200, fg_color="transparent", border_width=1,
+                      text_color=theme.TEXT, command=self._full_restore).pack(side="left", padx=8)
 
         def collect():
             if not name.get().strip():
@@ -546,6 +629,8 @@ class SettingsWindow(ctk.CTkToplevel):
             cfg["theme"] = next(k for k, v in THEMES.items() if v == theme_menu.get())
             cfg["autostart"] = bool(auto_var.get())
             cfg["confirm_exit"] = bool(exit_var.get())
+            for key, var in toggle_vars.items():
+                cfg[key] = bool(var.get())
         self._collectors.append(collect)
 
     def _tab_times(self, f):
@@ -747,12 +832,14 @@ class SettingsWindow(ctk.CTkToplevel):
             day_vars.append(v)
 
         b = self._card(f, "Tatiller", "Bu tarihlerde zil çalmaz. Tek günlük tatil için bitiş tarihini boş "
-                                      "bırakabilirsiniz. Tarihleri GG.AA.YYYY biçiminde yazın (ör. 29.10.2026).")
+                                      "bırakabilirsiniz. Tarihleri GG.AA.YYYY biçiminde yazın (ör. 29.10.2026). "
+                                      "Yarım günlük tatillerde «Saatten itibaren» kutusuna zillerin susacağı saati "
+                                      "yazın (ör. 28 Ekim için 13:00).")
         holder = ctk.CTkFrame(b, fg_color="transparent")
         holder.grid(row=0, column=0, columnspan=3, sticky="ew")
         head = ctk.CTkFrame(holder, fg_color="transparent")
         head.pack(fill="x")
-        for text, w in (("Tatilin adı", 260), ("Başlangıç", 120), ("Bitiş", 120)):
+        for text, w in (("Tatilin adı", 260), ("Başlangıç", 120), ("Bitiş", 120), ("Saatten itibaren", 110)):
             ctk.CTkLabel(head, text=text, width=w, anchor="w", font=theme.font(12, "bold")).pack(side="left", padx=3)
         rows = []
 
@@ -762,17 +849,18 @@ class SettingsWindow(ctk.CTkToplevel):
             except (TypeError, ValueError):
                 return ""
 
-        def add(name="", start="", end=""):
+        def add(name="", start="", end="", from_=""):
             r = ctk.CTkFrame(holder, fg_color="transparent")
             r.pack(fill="x", pady=2)
             n = ctk.CTkEntry(r, width=260, placeholder_text="ör. Yarıyıl Tatili")
             s = ctk.CTkEntry(r, width=120, placeholder_text="GG.AA.YYYY")
             e = ctk.CTkEntry(r, width=120, placeholder_text="GG.AA.YYYY")
-            for w, val in ((n, name), (s, to_tr(start)), (e, to_tr(end) if end != start else "")):
+            fr = ctk.CTkEntry(r, width=110, justify="center", placeholder_text="bütün gün")
+            for w, val in ((n, name), (s, to_tr(start)), (e, to_tr(end) if end != start else ""), (fr, from_ or "")):
                 if val:
                     w.insert(0, val)
                 w.pack(side="left", padx=3)
-            item = (r, n, s, e)
+            item = (r, n, s, e, fr)
             ctk.CTkButton(r, text="✕", width=30, fg_color="transparent", text_color=theme.DANGER,
                           hover_color=theme.ROW_ALT, command=lambda: (r.destroy(), rows.remove(item))).pack(
                 side="left", padx=6)
@@ -798,13 +886,33 @@ class SettingsWindow(ctk.CTkToplevel):
             refresh_empty()
 
         for h in sorted(cfg["holidays"], key=lambda h: h.get("start", "")):
-            add(h.get("name", ""), h.get("start", ""), h.get("end", ""))
+            add(h.get("name", ""), h.get("start", ""), h.get("end", ""), h.get("from", ""))
         refresh_empty()
+
+        def add_meb():
+            today = dt.date.today()
+            cal = meb_takvim.calendar_for(today)
+            if not cal:
+                messagebox.showinfo("MEB çalışma takvimi",
+                                    f"{meb_takvim.school_year(today)} eğitim yılının takvimi programa henüz "
+                                    "eklenmedi. Programın yeni sürümü çıkınca eklenecek; o zamana kadar tatilleri "
+                                    "elle girebilirsiniz.", parent=self)
+                return
+            existing = {(n.get().strip(), s.get().strip()) for _, n, s, _, _ in rows}
+            added = 0
+            for h in cal["holidays"]:
+                if (h["name"], to_tr(h["start"])) not in existing:
+                    add(h["name"], h["start"], h["end"], h.get("from", ""))
+                    added += 1
+            messagebox.showinfo("MEB çalışma takvimi",
+                                f"{meb_takvim.school_year(today)} eğitim yılı için {added} tatil eklendi "
+                                "(ara tatiller, yarıyıl, bayramlar, 28 Ekim öğleden sonra, yaz tatili).\n\n"
+                                "Kaydetmek için «Kaydet»e basın.", parent=self)
 
         def add_official():
             today = dt.date.today()
             y = today.year if today.month >= 8 else today.year - 1
-            existing = {s.get() for _, _, s, _ in rows}
+            existing = {s.get() for _, _, s, _, _ in rows}
             for name, d in (("Cumhuriyet Bayramı", dt.date(y, 10, 29)), ("Yılbaşı", dt.date(y + 1, 1, 1)),
                             ("Ulusal Egemenlik ve Çocuk Bayramı", dt.date(y + 1, 4, 23)),
                             ("Emek ve Dayanışma Günü", dt.date(y + 1, 5, 1)),
@@ -815,9 +923,11 @@ class SettingsWindow(ctk.CTkToplevel):
         btns = ctk.CTkFrame(b, fg_color="transparent")
         btns.grid(row=1, column=0, columnspan=3, sticky="w", pady=(8, 0))
         ctk.CTkButton(btns, text="+ Tatil ekle", width=110, command=add).pack(side="left")
-        ctk.CTkButton(btns, text="Resmî tatilleri ekle (bu eğitim yılı)", fg_color="transparent", border_width=1,
-                      text_color=theme.TEXT, command=add_official).pack(side="left", padx=8)
-        self._hint(b, "Dinî bayramların tarihleri her yıl değiştiği için onları elle eklemeniz gerekir.", row=2)
+        ctk.CTkButton(btns, text="📅  MEB çalışma takvimini ekle", command=add_meb).pack(side="left", padx=8)
+        ctk.CTkButton(btns, text="Yalnızca resmî tatiller", fg_color="transparent", border_width=1,
+                      text_color=theme.TEXT, command=add_official).pack(side="left")
+        self._hint(b, "MEB takvimi; ara tatilleri, yarıyıl tatilini, dinî ve resmî bayramları ve yaz tatilini tek "
+                      "tıkla ekler (Bakanlığın açıkladığı tarihlere göre).", row=2)
 
         def parse_date(text, label):
             try:
@@ -829,7 +939,7 @@ class SettingsWindow(ctk.CTkToplevel):
         def collect():
             cfg["active_days"] = [i for i, v in enumerate(day_vars) if v.get()]
             out = []
-            for _, n, s, e in rows:
+            for _, n, s, e, fr in rows:
                 if not (n.get().strip() or s.get().strip() or e.get().strip()):
                     continue
                 label = n.get().strip() or "Tatil"
@@ -837,7 +947,14 @@ class SettingsWindow(ctk.CTkToplevel):
                 end = parse_date(e.get(), label) if e.get().strip() else start
                 if end < start:
                     raise ValueError(f"Tatiller: «{label}» için bitiş tarihi başlangıçtan önce olamaz.")
-                out.append({"name": label, "start": start.isoformat(), "end": end.isoformat()})
+                entry = {"name": label, "start": start.isoformat(), "end": end.isoformat()}
+                if fr.get().strip():
+                    try:
+                        entry["from"] = fmt_hm(parse_hm(fr.get()))
+                    except ValueError:
+                        raise ValueError(f"Tatiller: «{label}» için saat SS:DD biçiminde olmalı (ör. 13:00) "
+                                         "ya da bütün gün tatilse boş bırakılmalı.")
+                out.append(entry)
             cfg["holidays"] = out
         self._collectors.append(collect)
 
@@ -1006,7 +1123,7 @@ class SettingsWindow(ctk.CTkToplevel):
 
         def add(e=None):
             e = e or {"enabled": True, "time": "08:20", "days": [0], "label": "Yeni zil",
-                      "sound": "", "text": "", "duration": DEFAULT_RING_SECONDS}
+                      "sound": "", "text": "", "duration": DEFAULT_RING_SECONDS, "full": True}
             card = ctk.CTkFrame(holder, fg_color=theme.CARD_BG, corner_radius=12)
             card.grid(row=len(items) + 1, column=0, sticky="ew", pady=5, padx=4)
             line1 = ctk.CTkFrame(card, fg_color="transparent")
@@ -1033,13 +1150,25 @@ class SettingsWindow(ctk.CTkToplevel):
             picker.length_lbl.pack_forget()
             picker.pack(side="left")
             self._pickers.append(picker)
-            ctk.CTkLabel(line2, text="Süre").pack(side="left", padx=(10, 4))
+            # İstiklal Marşı gibi uzun sesler için: ses (ya da kütüphanede seçilen bölümü) sonuna kadar çalar.
+            full = ctk.BooleanVar(value=bool(e.get("full", False)))
+
+            def toggle_full(dur=dur, full=full, picker=picker):
+                dur.set_enabled(not full.get())
+                picker.full_length = full.get()
+            ctk.CTkCheckBox(line2, text="Sonuna kadar çal", variable=full, command=toggle_full).pack(
+                side="left", padx=(14, 4))
+            ctk.CTkLabel(line2, text="ya da").pack(side="left", padx=(4, 4))
             dur.pack(side="left")
-            text = ctk.CTkEntry(line2, width=230, placeholder_text="Anons metni (isteğe bağlı)")
-            text.insert(0, e.get("text", ""))
-            text.pack(side="left", padx=8)
+            toggle_full()
+            line3 = ctk.CTkFrame(card, fg_color="transparent")
+            line3.pack(fill="x", padx=12, pady=(0, 10))
+            text = ctk.CTkEntry(line3, width=520, placeholder_text="Anons metni (isteğe bağlı)")
+            if e.get("text"):
+                text.insert(0, e["text"])
+            text.pack(side="left")
             item = {"card": card, "en": en, "label": label, "time": tm, "days": day_vars, "picker": picker,
-                    "text": text, "duration": dur, "orig": dict(e)}
+                    "text": text, "duration": dur, "full": full, "orig": dict(e)}
 
             def remove():
                 card.destroy()
@@ -1071,13 +1200,13 @@ class SettingsWindow(ctk.CTkToplevel):
         ctk.CTkButton(btns, text="Pazartesi bayrak töreni", fg_color="transparent", border_width=1,
                       text_color=theme.TEXT, command=lambda: add({
                           "enabled": True, "time": "08:20", "days": [0], "label": "Bayrak Töreni",
-                          "sound": "",
+                          "sound": "", "full": True,
                           "text": "Sevgili öğrenciler, bayrak töreni için okul bahçesinde toplanınız."})).pack(
             side="left", padx=8)
         ctk.CTkButton(btns, text="Cuma haftayı kapatma", fg_color="transparent", border_width=1,
                       text_color=theme.TEXT, command=lambda: add({
                           "enabled": True, "time": "15:25", "days": [4], "label": "Bayrak Töreni (Cuma)",
-                          "sound": "",
+                          "sound": "", "full": True,
                           "text": "Sevgili öğrenciler, haftayı kapatma töreni için hazırlanınız."})).pack(side="left")
 
         def collect():
@@ -1097,7 +1226,7 @@ class SettingsWindow(ctk.CTkToplevel):
                     raise ValueError(f"Ek Ziller: «{name}» için en az bir gün seçin.")
                 out.append({**it["orig"], "enabled": bool(it["en"].get()), "time": tm, "days": days, "label": name,
                             "sound": it["picker"].get(), "text": it["text"].get().strip(),
-                            "duration": seconds})
+                            "duration": seconds, "full": bool(it["full"].get())})
             seen = set()
             for e in out:
                 for d in e["days"]:
@@ -1351,6 +1480,50 @@ class SettingsWindow(ctk.CTkToplevel):
         load()
 
     # -- yedekleme ----------------------------------------------------------
+
+    def _full_backup(self):
+        if not self._collect():
+            return
+        path = filedialog.asksaveasfilename(
+            parent=self, title="Tam yedeği kaydet", defaultextension=".zip",
+            initialfile=f"OkulZili_yedek_{dt.date.today().isoformat()}.zip", filetypes=[("Okul Zili yedeği", "*.zip")])
+        if not path:
+            return
+        try:
+            result = backup.create_backup(self.cfg, path)
+        except Exception as exc:  # noqa: BLE001
+            messagebox.showerror("Yedek alınamadı", f"Yedek dosyası yazılamadı:\n{exc}", parent=self)
+            return
+        messagebox.showinfo("Tam yedek", f"Yedek kaydedildi: {result['sounds']} ses, "
+                                         f"{result['bytes'] / 1024 / 1024:.1f} MB.\n\n"
+                                         "Bu dosyayı USB belleğe ya da e-postaya kopyalayarak saklayın.", parent=self)
+
+    def _full_restore(self):
+        path = filedialog.askopenfilename(parent=self, title="Tam yedek dosyasını seçin",
+                                          filetypes=[("Okul Zili yedeği", "*.zip")])
+        if not path:
+            return
+        try:
+            info = backup.read_backup_info(path)
+        except Exception as exc:  # noqa: BLE001
+            messagebox.showerror("Geri yüklenemedi", f"Dosya okunamadı:\n{exc}", parent=self)
+            return
+        when = info.get("created", "?")
+        if not messagebox.askyesno(
+                "Tam yedekten geri yükle", f"{when} tarihli yedek ({info.get('sounds', '?')} ses) geri yüklenecek.\n\n"
+                                           "Şu anki ayarların ve kütüphanenin yerini yedektekiler alacak. "
+                                           "Devam edilsin mi?", icon="warning", parent=self):
+            return
+        try:
+            cfg = backup.restore_backup(path)
+        except Exception as exc:  # noqa: BLE001
+            messagebox.showerror("Geri yüklenemedi", f"Yedek geri yüklenemedi:\n{exc}", parent=self)
+            return
+        self.app.apply_config(cfg, keep_runtime=True)
+        if self.app.window is not None:
+            self.app.window.flash("✓  Yedek geri yüklendi")
+        self.app.player.stop_preview()
+        self.destroy()
 
     def _export(self):
         if not self._collect():

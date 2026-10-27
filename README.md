@@ -54,6 +54,20 @@ Okul zillerini ders programına göre otomatik çalan, Türkçe arayüzlü masa�
   açma düğmesi görünür. Zilleri kapatmak, elle zil çalmak ve programı kapatmak onay ister.
   Program iki kez açılamaz (ziller iki kez çalmaz). Ses aygıtı sonradan bağlanırsa ses kendiliğinden düzelir;
   bozuk bir ses dosyasında klasik zil çalar.
+- **Sistem tepsisi:** Pencere kapatılınca program kapanmaz, saatin yanındaki zil simgesinde çalışmaya devam eder.
+  Tamamen kapatmak için simgeye sağ tıklayıp «Programı kapat» seçilir (Ayarlar → Genel'den kapatılabilir).
+- **Kendiliğinden yeniden açılma:** Program beklenmedik şekilde kapanırsa Windows Görev Zamanlayıcı onu 5 dakika
+  içinde yeniden açar. Bilerek kapatılan program açılmaz.
+- **Uyku engeli:** İlk zilden 30 dk önce ile son zilden 5 dk sonra arasında bilgisayar uykuya geçmez.
+- **Denetimler:** Windows sesi kapalı / çok kısıksa ya da hoparlör yoksa kırmızı uyarı; bilgisayar saati internet
+  saatinden 1 dakikadan fazla farklıysa sarı uyarı (internet varsa).
+- **Kendini güncelleme:** Yeni sürüm çıkınca üstte «Güncelleme var» düğmesi görünür; «Güncelle» yeni sürümü indirir,
+  sessizce kurar ve programı yeniden açar.
+- **Tam yedek:** Ayarlar ve bütün sesler tek bir .zip dosyasına; yeni bilgisayarda tek tıkla geri yüklenir.
+- **MEB çalışma takvimi:** Ara tatiller, yarıyıl, bayramlar, 28 Ekim öğleden sonra ve yaz tatili tek tıkla eklenir.
+  Yarım günlük tatiller desteklenir (belirtilen saatten sonraki ziller çalmaz).
+- **Çalınacak bölüm:** Kütüphanede her ses için zilde çalınacak bölüm seçilir (ör. nakarat 1:05–1:20).
+  Ek ziller «sonuna kadar çal» seçeneğiyle İstiklal Marşı gibi uzun sesleri tam çalabilir.
 - Açık ve koyu tema. Küçük ekranlarda ve Windows ölçeklendirmesinde (%125, %150) pencereler ekrana sığar.
 
 ## Ayar düzeyleri
@@ -148,6 +162,11 @@ python -m unittest discover -s tests    # testleri çalıştırır
 | `okul_zili/scheduler.py` | Saati izler, zamanı gelen zili çalar |
 | `okul_zili/audio.py` | Zil ve anonsları sırayla çalar (pygame) |
 | `okul_zili/sounds.py` | Zil sesi kimliklerini kütüphanedeki dosyalara çevirir |
+| `okul_zili/system.py` | Uyku engeli, Windows ses düzeyi, internet saati, yeniden başlatma görevi |
+| `okul_zili/tray.py` | Sistem tepsisi simgesi |
+| `okul_zili/updater.py` | Programın kendini güncellemesi (GitHub sürümleri) |
+| `okul_zili/backup.py` | Tam yedek (ayarlar + sesler) |
+| `okul_zili/meb_takvim.py` | MEB çalışma takvimi verileri |
 | `okul_zili/rotation.py` | Değişen zil sesi (gün/hafta/ay için rastgele seçim) |
 | `okul_zili/library.py` | Ses kütüphanesi (kayıt listesi, kısa dosya adları) |
 | `okul_zili/downloader.py` | yt-dlp ile indirme, ffmpeg ile Opus'a dönüştürme, yt-dlp/Deno güncelleme |

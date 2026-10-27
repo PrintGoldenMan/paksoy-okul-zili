@@ -69,6 +69,11 @@ class Spin(ctk.CTkFrame):
         text = self.var.get().strip().replace(",", ".")
         return float(text) if self.decimals else int(text)
 
+    def set_enabled(self, enabled: bool):
+        for w in self.winfo_children():
+            if isinstance(w, (ctk.CTkButton, ctk.CTkEntry)):
+                w.configure(state="normal" if enabled else "disabled")
+
     def _step(self, d):
         try:
             v = self._parse()
@@ -159,15 +164,7 @@ class SafeConfirm(ctk.CTkToplevel):
         self.after(50, self._focus)
 
     def _focus(self):
-        # Pencereyi sahibinin ortasına yerleştir.
-        try:
-            self.update_idletasks()
-            owner = self.master.winfo_toplevel()
-            x = owner.winfo_rootx() + (owner.winfo_width() - self.winfo_width()) // 2
-            y = owner.winfo_rooty() + (owner.winfo_height() - self.winfo_height()) // 3
-            self.geometry(f"+{max(0, x)}+{max(0, y)}")
-        except Exception:  # noqa: BLE001
-            pass
+        center_over(self)
         self.lift()
         self.cancel_btn.focus_set()
         try:
@@ -194,6 +191,18 @@ class SafeConfirm(ctk.CTkToplevel):
     def _cancel(self):
         self.result = False
         self.destroy()
+
+
+def center_over(win):
+    """Küçük bir pencereyi sahibinin ortasına yerleştirir."""
+    try:
+        win.update_idletasks()
+        owner = win.master.winfo_toplevel()
+        x = owner.winfo_rootx() + (owner.winfo_width() - win.winfo_width()) // 2
+        y = owner.winfo_rooty() + (owner.winfo_height() - win.winfo_height()) // 3
+        win.geometry(f"+{max(0, x)}+{max(0, y)}")
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def ask_safely(master, title, heading, message, accept_text, countdown=0, accept_side="left") -> bool:

@@ -192,6 +192,15 @@ class Library:
                     i["title"] = short_title(title)
             self._save()
 
+    def set_part(self, item_id: str, start, end):
+        """Zilde bu sesin hangi bölümünün çalınacağı (saniye; end None ise sonuna kadar)."""
+        with self._lock:
+            for i in self._items:
+                if i["id"] == item_id:
+                    i["part_start"] = round(float(start or 0.0), 2)
+                    i["part_end"] = round(float(end), 2) if end is not None else None
+            self._save()
+
     def remove(self, item_id: str):
         with self._lock:
             item = next((i for i in self._items if i["id"] == item_id), None)

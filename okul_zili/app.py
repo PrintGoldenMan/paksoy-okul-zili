@@ -5,10 +5,12 @@ import logging.handlers
 import os
 import shutil
 import sys
+import threading
+import time
 
 import customtkinter as ctk
 
-from . import APP_NAME, __version__, autostart, config, paths, rotation, sounds
+from . import APP_NAME, __version__, autostart, config, paths, rotation, sounds, system, updater
 from .audio import Player
 from .config import BELL_NAMES, ring_seconds
 from .scheduler import BellScheduler
@@ -49,6 +51,12 @@ class App:
         self.player = Player(lambda: self.cfg, on_state=self._on_player_state)
         self.scheduler = BellScheduler(lambda: self.cfg, self.player)
         self.window = None
+        self.tray = None
+        self.volume = system.VolumeMonitor()
+        self.clock = system.ClockMonitor()
+        self.updates = updater.UpdateChecker(lambda: self.cfg.get("check_updates", True))
+        if self.cfg.get("watchdog", True) != system.watchdog_installed():
+            threading.Thread(target=system.set_watchdog, args=(self.cfg.get("watchdog", True),), daemon=True).start()
 
     def _save_quietly(self):
         try:
@@ -100,10 +108,36 @@ class App:
                                      f"Ayarlar diske yazılamadı. Program şimdilik bu ayarlarla çalışacak, "
                                      f"ancak yeniden açılınca eski ayarlar yüklenir.\n\n{exc}", parent=self.window)
         self.scheduler.reload()
+        if self.cfg.get("watchdog", True) != system.watchdog_installed():
+            threading.Thread(target=system.set_watchdog, args=(self.cfg.get("watchdog", True),), daemon=True).start()
         if self.cfg.get("autostart") != autostart.is_enabled():
             autostart.set_enabled(bool(self.cfg.get("autostart")))
         if self.window is not None:
             self.window.refresh_all()
+
+    def quit(self):
+        """Kullanıcı programı bilerek kapattı: bekçi görevi onu yeniden açmasın."""
+        log.info("Program kullanıcı tarafından kapatıldı")
+        try:
+            user_closed_marker().write_text(time.strftime("%Y-%m-%d %H:%M"), encoding="utf-8")
+        except OSError:
+            pass
+        self.player.stop()
+        system.set_keep_awake(False)
+        if self.tray is not None:
+            self.tray.stop()
+        _release_instance()
+        os._exit(0)
+
+    def quit_for_update(self):
+        """Güncelleme kurulumu başlatıldı: program kapanır (kullanıcı kapatması sayılmaz)."""
+        log.info("Güncelleme için program kapanıyor")
+        self.player.stop()
+        system.set_keep_awake(False)
+        if self.tray is not None:
+            self.tray.stop()
+        _release_instance()
+        os._exit(0)
 
     def restart(self):
         """Programı kapatıp yeniden açar (yt-dlp ya da program güncellemesinden sonra)."""
@@ -130,6 +164,8 @@ class App:
         _remove_old_builtin_sounds()
         from .ui.main_window import MainWindow
         self.window = MainWindow(self)
+        from .tray import Tray
+        self.tray = Tray()
         self.scheduler.start()
         if not self.cfg.get("level"):
             self.window.after(300, self.window.open_level_dialog)
@@ -234,6 +270,12 @@ def self_test(out_path):
             pygame.mixer.music.load(out)
             pygame.mixer.music.unload()
             result["opus_playable"] = True
+        if os.name == "nt":
+            importlib.import_module("pystray._win32")       # sistem tepsisi
+            from . import system
+            result["volume"] = system.read_system_volume()  # Windows ses düzeyi (aygıt yoksa device=False)
+            if result["volume"] is None:
+                raise RuntimeError("Windows ses düzeyi okunamadı (pycaw)")
         result["ok"] = True
     except Exception as exc:  # noqa: BLE001
         result["ok"] = False
@@ -243,14 +285,33 @@ def self_test(out_path):
     return 0 if result["ok"] else 1
 
 
+def user_closed_marker():
+    return paths.data_dir() / "kullanici_kapatti"
+
+
 def main():
     if len(sys.argv) >= 3 and sys.argv[1] == "--oz-selftest":
         sys.exit(self_test(sys.argv[2]))
     _setup_logging()
-    if not _acquire_instance(wait_seconds=20 if "--oz-restart" in sys.argv else 0):
+    watchdog = "--oz-watchdog" in sys.argv
+    if watchdog:
+        # Windows Görev Zamanlayıcı her 5 dakikada bir buraya gelir. Program açıksa, kullanıcı bilerek
+        # kapattıysa ya da güncelleme sürüyorsa hiçbir şey yapılmaz (sessizce çıkılır).
+        if user_closed_marker().exists() or updater.updating_recently():
+            return
+        if not _acquire_instance():
+            return
+        log.warning("Program kapalı bulundu; bekçi görevi yeniden başlattı")
+    elif not _acquire_instance(wait_seconds=20 if "--oz-restart" in sys.argv else 0):
         log.info("Program zaten açık; ikinci kopya kapatıldı")
         _show_already_running()
         return
+    else:
+        try:
+            user_closed_marker().unlink()   # elle açıldı: bekçi yeniden devrede
+        except OSError:
+            pass
+    updater.clear_updating_mark()
     log.info("%s %s başlatıldı (veri klasörü: %s)", APP_NAME, __version__, paths.data_dir())
     if os.name == "nt":
         try:  # Görev çubuğunda Python simgesi yerine programın kendi kimliği görünsün.

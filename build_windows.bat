@@ -14,6 +14,7 @@ if errorlevel 1 goto :hata
     --collect-data customtkinter ^
     --collect-all edge_tts ^
     --collect-all yt_dlp --collect-all yt_dlp_ejs --collect-all imageio_ffmpeg --copy-metadata yt-dlp ^
+    --collect-submodules pystray --collect-submodules pycaw --hidden-import pycaw.pycaw ^
     --collect-submodules pyttsx3 ^
     --collect-submodules comtypes ^
     --hidden-import comtypes.stream ^
