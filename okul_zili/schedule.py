@@ -105,7 +105,8 @@ def holiday_name(cfg: dict, date: dt.date):
     """Tarih tatilse tatilin adını (boş olabilir), değilse None döndürür."""
     iso = date.isoformat()
     for h in cfg.get("holidays", []):
-        if h.get("start", "") <= iso <= h.get("end", h.get("start", "")):
+        start = h.get("start") or ""
+        if start and start <= iso <= (h.get("end") or start):
             return h.get("name") or "Tatil"
     return None
 
@@ -141,6 +142,14 @@ def _bell(cfg, minute, kind, lesson, variant, note):
 def events_for_lessons(cfg: dict, lessons: list) -> list:
     timing = cfg["timing"]
     offset = int(timing.get("student_offset", 2))
+    # Süreler ile hesaplanan programda öğle arası ayardan bilinir; elle girilen saatlerde
+    # 30 dakika ve üzeri boşluk öğle arası sayılır.
+    auto = lessons == auto_lessons(timing)
+    lunch_after = int(timing.get("lunch_after", 0)) if int(timing.get("lunch_minutes", 0)) > 0 else 0
+
+    def is_lunch(lesson_no, gap):
+        return lesson_no == lunch_after if auto else gap >= 30
+
     events = []
     for i, (start, end) in enumerate(lessons, start=1):
         prev_end = lessons[i - 2][1] if i > 1 else None
@@ -152,8 +161,7 @@ def events_for_lessons(cfg: dict, lessons: list) -> list:
                     e.off = "Kapalı"   # Sabah Zilleri ayarından kapatıldı; listede görünür ama çalmaz
                 events.append(e)
             elif student > prev_end:
-                note = "Öğle arası bitmek üzere" if start - prev_end > int(timing["break_minutes"]) + 5 \
-                    else "Teneffüs bitmek üzere"
+                note = "Öğle arası bitmek üzere" if is_lunch(i - 1, start - prev_end) else "Teneffüs bitmek üzere"
                 events.append(_bell(cfg, student, "ogrenci", i, "", note))
         e = _bell(cfg, start, "ogretmen", i, "", f"{i}. ders başlar")
         if i == 1 and not timing.get("morning_teacher_bell", True):
@@ -163,7 +171,7 @@ def events_for_lessons(cfg: dict, lessons: list) -> list:
             variant, note = "last", "Okul dağılır"
         else:
             gap = lessons[i][0] - end
-            if gap >= 30:
+            if is_lunch(i, gap):
                 variant, note = "lunch", f"{i}. ders biter · Öğle arası ({gap} dk)"
             else:
                 variant, note = "", f"{i}. ders biter · Teneffüs ({gap} dk)"

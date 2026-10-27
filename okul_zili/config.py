@@ -3,6 +3,7 @@
 import copy
 import json
 import logging
+import os
 
 from . import paths
 
@@ -125,16 +126,32 @@ def profile_snapshot(cfg: dict) -> dict:
 
 
 def _merge(defaults, loaded):
-    """Kayıtlı ayarları varsayılanların üstüne yazar; yeni sürümde eklenen anahtarlar korunur."""
-    if not isinstance(defaults, dict) or not isinstance(loaded, dict):
-        return copy.deepcopy(loaded)
+    """Kayıtlı ayarları varsayılanların üstüne yazar; yeni sürümde eklenen anahtarlar korunur.
+    Türü varsayılandan farklı olan değerler (ör. elle düzenlenip bozulmuş) yok sayılır."""
+    if not isinstance(loaded, dict):
+        return copy.deepcopy(defaults)
     out = copy.deepcopy(defaults)
     for key, value in loaded.items():
-        if key in out and isinstance(out[key], dict) and isinstance(value, dict):
-            out[key] = _merge(out[key], value)
+        if key not in out:
+            out[key] = copy.deepcopy(value)
+        elif isinstance(out[key], dict):
+            if isinstance(value, dict):
+                out[key] = _merge(out[key], value)
+        elif not _same_type(out[key], value):
+            log.warning("Ayar «%s» geçersiz, varsayılan kullanılıyor", key)
         else:
             out[key] = copy.deepcopy(value)
     return out
+
+
+def _same_type(default, value) -> bool:
+    if default is None or value is None:
+        return True
+    if isinstance(default, bool) or isinstance(value, bool):
+        return isinstance(default, bool) == isinstance(value, bool)
+    if isinstance(default, (int, float)):
+        return isinstance(value, (int, float))
+    return isinstance(value, type(default))
 
 
 def default_config() -> dict:
@@ -146,8 +163,12 @@ def load() -> dict:
     if not path.exists():
         return default_config()
     try:
-        with open(path, encoding="utf-8") as f:
-            return _merge(DEFAULTS, json.load(f))
+        # utf-8-sig: Not Defteri ile kaydedilmiş (BOM'lu) dosyalar da okunur.
+        with open(path, encoding="utf-8-sig") as f:
+            data = json.load(f)
+        if not isinstance(data, dict):
+            raise ValueError("ayar dosyası bir nesne değil")
+        return _merge(DEFAULTS, data)
     except (OSError, ValueError) as exc:
         log.error("Ayarlar okunamadı, varsayılanlar kullanılıyor: %s", exc)
         backup = path.with_suffix(".bozuk.json")
@@ -163,12 +184,17 @@ def save(cfg: dict) -> None:
     tmp = path.with_suffix(".tmp")
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(cfg, f, ensure_ascii=False, indent=2)
+        f.flush()
+        os.fsync(f.fileno())
     tmp.replace(path)
 
 
 def import_from(file_path) -> dict:
-    with open(file_path, encoding="utf-8") as f:
-        return _merge(DEFAULTS, json.load(f))
+    with open(file_path, encoding="utf-8-sig") as f:
+        data = json.load(f)
+    if not isinstance(data, dict):
+        raise ValueError("Bu dosya bir Okul Zili ayar dosyası değil.")
+    return _merge(DEFAULTS, data)
 
 
 def export_to(cfg: dict, file_path) -> None:

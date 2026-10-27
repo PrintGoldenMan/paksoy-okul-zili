@@ -323,7 +323,8 @@ class SettingsWindow(ctk.CTkToplevel):
         vol.set(cfg["master_volume"])
         labeled_row(b, 0, "Zil ses düzeyi", vol)
         vol_lbl.grid(row=0, column=2, padx=8)
-        dur = duration_spin(b, cfg["bells"]["ogretmen"].get("duration"))
+        initial_duration = ring_seconds(cfg["bells"]["ogretmen"].get("duration"))
+        dur = duration_spin(b, initial_duration)
         labeled_row(b, 1, "Zil çalma süresi", dur, "Üç zil için de geçerlidir")
 
         def try_sound():
@@ -352,8 +353,9 @@ class SettingsWindow(ctk.CTkToplevel):
                 seconds = dur.get()
             except ValueError as exc:
                 raise ValueError(f"Zil çalma süresi: {exc}")
-            for kind in BELL_TYPES:
-                cfg["bells"][kind]["duration"] = seconds
+            if seconds != initial_duration:  # değiştirilmediyse zillere ayrı ayrı verilmiş süreler korunur
+                for kind in BELL_TYPES:
+                    cfg["bells"][kind]["duration"] = seconds
         self._collectors.append(collect)
 
     def _tab_general(self, f):
@@ -452,6 +454,9 @@ class SettingsWindow(ctk.CTkToplevel):
 
         self._morning_card(f)
 
+        def lessons_now():
+            return schedule.lessons_for_weekday(dict(cfg, day_overrides={}), 0)
+
         def collect():
             if auto_widgets:
                 first, count, length, brk, lunch_after, lunch = auto_widgets
@@ -469,6 +474,12 @@ class SettingsWindow(ctk.CTkToplevel):
                 t["student_offset"] = offset.get()
             except ValueError as exc:
                 raise ValueError(f"Öğrenci zili: {exc}")
+            shortest = min((b[0] - a[1] for a, b in zip(lessons_now(), lessons_now()[1:])), default=None)
+            if t["student_offset"] and shortest is not None and t["student_offset"] >= shortest:
+                raise ValueError(f"Öğrenci zili dersten {t['student_offset']} dakika önce çalacak şekilde ayarlı, "
+                                 f"ancak en kısa teneffüs {shortest} dakika. Öğrenci zili teneffüsten önce "
+                                 f"çalamayacağı için bazı öğrenci zilleri çalmaz. Lütfen "
+                                 f"{max(0, shortest - 1)} dakika veya daha az girin.")
         self._collectors.append(collect)
 
         # Önizleme
@@ -515,7 +526,7 @@ class SettingsWindow(ctk.CTkToplevel):
         labeled_row(b, 0, "Ses düzeyi", vol)
         vol_lbl.grid(row=0, column=2, padx=8)
         ctk.CTkButton(b, text="■ Durdur", width=90, fg_color=theme.DANGER, hover_color=theme.DANGER_HOVER,
-                      command=self.app.player.stop).grid(row=0, column=3, padx=8)
+                      command=self.app.player.stop_preview).grid(row=0, column=3, padx=8)
 
         pickers = {}
         for kind in BELL_TYPES:
@@ -758,8 +769,7 @@ class SettingsWindow(ctk.CTkToplevel):
             text = template
         text = capitalize_first(text.strip())
         if text:
-            self.app.player.stop()
-            self.app.player.say(text, tts_cfg=copy.deepcopy(self.cfg["tts"]))
+            self.app.player.say(text, tts_cfg=copy.deepcopy(self.cfg["tts"]), preview=True)
 
     def _tab_overrides(self, f):
         cfg = self.cfg
@@ -890,6 +900,14 @@ class SettingsWindow(ctk.CTkToplevel):
                 out.append({"enabled": bool(it["en"].get()), "time": tm, "days": days, "label": name,
                             "sound": it["picker"].get(), "text": it["text"].get().strip(),
                             "duration": seconds})
+            seen = set()
+            for e in out:
+                for d in e["days"]:
+                    key = (e["label"], e["time"], d)
+                    if key in seen:
+                        raise ValueError(f"Ek Ziller: «{e['label']}» adında, {e['time']} saatinde ve aynı günde "
+                                         "iki zil var. Lütfen birini silin ya da adını değiştirin.")
+                    seen.add(key)
             cfg["extra_bells"] = out
         self._collectors.append(collect)
 
@@ -1018,6 +1036,9 @@ class SettingsWindow(ctk.CTkToplevel):
             if not name:
                 messagebox.showerror("Program adı", "Lütfen programa bir ad verin.", parent=self)
                 return
+            if name in cfg["profiles"] and not messagebox.askyesno(
+                    "Program zaten var", f"«{name}» adında bir program zaten var. Üzerine yazılsın mı?", parent=self):
+                return
             act(lambda: cfg["profiles"].__setitem__(name, config.profile_snapshot(cfg)))
 
         def add_short():
@@ -1071,6 +1092,9 @@ class SettingsWindow(ctk.CTkToplevel):
                     day = dt.datetime.strptime(d.get().strip(), "%d.%m.%Y").date()
                 except ValueError:
                     raise ValueError(f"Programlar: «{d.get()}» geçerli bir tarih değil. GG.AA.YYYY biçiminde yazın.")
+                if any(x["date"] == day.isoformat() for x in out):
+                    raise ValueError(f"Programlar: {d.get().strip()} tarihine birden fazla program atanmış. "
+                                     "Her tarihe yalnızca bir program atanabilir.")
                 out.append({"date": day.isoformat(), "profile": m.get()})
             cfg["profile_dates"] = out
         self._collectors.append(collect)
@@ -1144,7 +1168,7 @@ class SettingsWindow(ctk.CTkToplevel):
             return
         try:
             self.cfg = config.import_from(path)
-        except (OSError, ValueError) as exc:
+        except Exception as exc:  # noqa: BLE001 - kullanıcı her türlü dosyayı seçebilir
             messagebox.showerror("İçe aktarılamadı", f"Dosya okunamadı:\n{exc}", parent=self)
             return
         self.cfg["level"] = self.level
@@ -1173,11 +1197,11 @@ class SettingsWindow(ctk.CTkToplevel):
                                      "olabilir.\n\nYine de kaydedilsin mi?", parent=self):
                 return
         self.cfg["level"] = self.level
-        self.app.apply_config(self.cfg)
+        self.app.apply_config(self.cfg, keep_runtime=True)
         self.destroy()
 
     def _cancel(self):
-        self.app.player.stop()
+        self.app.player.stop_preview()
         self.destroy()
 
 

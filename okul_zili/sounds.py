@@ -6,12 +6,14 @@ böylece programla birlikte ayrıca ses dosyası dağıtmaya gerek kalmaz.
 
 import array
 import math
+import threading
 import wave
 from pathlib import Path
 
 from . import paths
 
 RATE = 22050
+_gen_lock = threading.Lock()
 SYNTH_VERSION = 1
 
 BUILTIN_SOUNDS = {
@@ -189,7 +191,9 @@ def builtin_path(name: str) -> Path:
         name = "klasik"
     path = paths.builtin_sound_dir() / f"{name}_v{SYNTH_VERSION}.wav"
     if not path.exists():
-        _write_wav(_GENERATORS[name](), path)
+        with _gen_lock:  # açılıştaki hazırlık ile ilk zil aynı anda üretmeye çalışmasın
+            if not path.exists():
+                _write_wav(_GENERATORS[name](), path)
     return path
 
 
@@ -215,12 +219,12 @@ def length_seconds(sound_id: str):
     path = resolve(sound_id)
     if path is None:
         return None
+    # Yalnızca WAV başlığından okunur; MP3'ü çözmek arayüzü dondurabilir.
+    if not str(path).lower().endswith(".wav"):
+        return None
     try:
-        if str(path).lower().endswith(".wav"):
-            with wave.open(str(path)) as w:
-                return w.getnframes() / float(w.getframerate())
-        import pygame
-        return pygame.mixer.Sound(str(path)).get_length()
+        with wave.open(str(path)) as w:
+            return w.getnframes() / float(w.getframerate())
     except Exception:  # noqa: BLE001 - okunamayan dosya
         return None
 

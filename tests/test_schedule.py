@@ -87,6 +87,15 @@ class ScheduleTests(unittest.TestCase):
         self.assertEqual(config.ring_seconds(0), 1.5)
         self.assertEqual(config.ring_seconds("1"), 1.5)
 
+    def test_short_lunch_still_detected_in_auto_mode(self):
+        self.cfg["timing"]["lunch_minutes"] = 20
+        exits = {e.time_str: e.variant for e in schedule.events_for_date(self.cfg, MONDAY) if e.kind == "cikis"}
+        self.assertEqual(exits["12:30"], "lunch")
+
+    def test_holiday_with_empty_end(self):
+        self.cfg["holidays"] = [{"name": "Tatil", "start": "2026-10-26", "end": ""}]
+        self.assertEqual(schedule.events_for_date(self.cfg, MONDAY), [])
+
     def test_weekend_and_holiday(self):
         self.assertEqual(schedule.events_for_date(self.cfg, dt.date(2026, 10, 25)), [])
         self.cfg["holidays"] = [{"name": "Cumhuriyet Bayramı", "start": "2026-10-29", "end": "2026-10-29"}]
@@ -113,6 +122,45 @@ class ScheduleTests(unittest.TestCase):
                                     "sound": "builtin:gong", "text": ""}]
         events = schedule.events_for_date(self.cfg, MONDAY)
         self.assertEqual((events[0].time_str, events[0].kind), ("08:20", "ek"))
+
+
+class ConfigFileTests(unittest.TestCase):
+    def setUp(self):
+        import os
+        import tempfile
+        self._home = tempfile.mkdtemp()
+        self._old = os.environ.get("HOME"), os.environ.get("APPDATA")
+        os.environ["HOME"] = os.environ["APPDATA"] = self._home
+
+    def tearDown(self):
+        import os
+        for key, value in zip(("HOME", "APPDATA"), self._old):
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+    def _write(self, text, bom=False):
+        from okul_zili import paths
+        with open(paths.config_file(), "w", encoding="utf-8-sig" if bom else "utf-8") as f:
+            f.write(text)
+
+    def test_bom_file_is_read(self):
+        self._write('{"school_name": "Deneme Lisesi"}', bom=True)
+        self.assertEqual(config.load()["school_name"], "Deneme Lisesi")
+
+    def test_wrong_types_fall_back_to_defaults(self):
+        self._write('{"timing": null, "tts": [], "master_volume": "yüksek", "auto_ring": false}')
+        cfg = config.load()
+        self.assertEqual(cfg["timing"]["first_lesson"], "08:30")
+        self.assertIsInstance(cfg["tts"], dict)
+        self.assertEqual(cfg["master_volume"], 85)
+        self.assertFalse(cfg["auto_ring"])
+        self.assertEqual(len(schedule.events_for_date(cfg, MONDAY)), 24)
+
+    def test_non_object_file_gives_defaults(self):
+        self._write("[]")
+        self.assertEqual(config.load()["school_name"], config.DEFAULTS["school_name"])
 
 
 class FakePlayer:

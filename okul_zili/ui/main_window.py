@@ -230,6 +230,15 @@ class MainWindow(ctk.CTk):
 
     def _tick(self, reschedule=True):
         now = dt.datetime.now()
+        if reschedule:
+            # Önce bir sonraki güncellemeyi planla: bir hata olsa bile saat durmasın.
+            self.after(1000 - now.microsecond // 1000 + 5, self._tick)
+        try:
+            self._update(now)
+        except Exception:  # noqa: BLE001
+            log.exception("Ana ekran güncellenemedi")
+
+    def _update(self, now):
         cfg = self.app.cfg
         self.clock_lbl.configure(text=now.strftime("%H:%M:%S"))
         self.date_lbl.configure(text=long_date(now.date()))
@@ -284,8 +293,6 @@ class MainWindow(ctk.CTk):
             self.next_left.configure(text=(f"{h} sa {m:02d} dk kaldı" if h else f"{m:02d}:{s:02d} kaldı"))
 
         self._update_statusbar(cfg, now)
-        if reschedule:
-            self.after(1000 - now.microsecond // 1000 + 5, self._tick)
 
     def _update_statusbar(self, cfg, now):
         if self.app.player.playing:

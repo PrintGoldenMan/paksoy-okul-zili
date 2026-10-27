@@ -2,3 +2,5 @@ customtkinter>=5.2,<6
 pygame>=2.5
 edge-tts>=6.1
 pyttsx3>=2.90
+comtypes; sys_platform == "win32"
+pywin32; sys_platform == "win32"

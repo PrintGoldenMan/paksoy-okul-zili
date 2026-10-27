@@ -13,6 +13,7 @@ import hashlib
 import logging
 import os
 import threading
+import time
 
 from . import paths
 
@@ -26,10 +27,14 @@ ENGINES = {"edge": "Doğal ses (internet ile üretilir, önbelleğe alınır)",
            "offline": "Windows sesleri (internetsiz)"}
 
 _lock = threading.Lock()
+# Doğal ses (internet) başarısız olursa bu süre boyunca yeniden denenmez.
+EDGE_RETRY_SECONDS = 300
+_edge_failed_at = -EDGE_RETRY_SECONDS
 
 
 def _cache_path(text: str, tts_cfg: dict, ext: str):
-    key = f"{tts_cfg.get('engine')}|{tts_cfg.get('voice')}|{tts_cfg.get('rate')}|{text}"
+    voice = tts_cfg.get("voice") if tts_cfg.get("engine") == "edge" else tts_cfg.get("offline_voice", "")
+    key = f"{tts_cfg.get('engine')}|{voice}|{tts_cfg.get('rate')}|{text}"
     digest = hashlib.sha1(key.encode("utf-8")).hexdigest()[:20]
     return paths.tts_cache_dir() / f"{digest}.{ext}"
 
@@ -104,19 +109,28 @@ def synthesize(text: str, tts_cfg: dict):
     text = (text or "").strip()
     if not text:
         return None
+    global _edge_failed_at
     engine = tts_cfg.get("engine", "edge")
     order = ["edge", "offline"] if engine == "edge" else ["offline", "edge"]
+    targets = [(eng, _cache_path(text, dict(tts_cfg, engine=eng), "mp3" if eng == "edge" else "wav"))
+               for eng in order]
+    # Önce kayıtlı anonslara bak: internet yokken zil sırasında beklenmesin.
+    for _, out in targets:
+        if out.exists() and out.stat().st_size > 0:
+            return out
     with _lock:
-        for eng in order:
-            cfg = dict(tts_cfg, engine=eng)
-            out = _cache_path(text, cfg, "mp3" if eng == "edge" else "wav")
+        for eng, out in targets:
             if out.exists() and out.stat().st_size > 0:
                 return out
+            if eng == "edge" and time.monotonic() - _edge_failed_at < EDGE_RETRY_SECONDS:
+                continue  # internet kısa süre önce yoktu; her anonsta yeniden bekleme
             try:
-                (_edge if eng == "edge" else _offline)(text, cfg, out)
+                (_edge if eng == "edge" else _offline)(text, dict(tts_cfg, engine=eng), out)
                 log.info("Anons üretildi (%s): %s", eng, text)
                 return out
             except Exception as exc:  # noqa: BLE001
+                if eng == "edge":
+                    _edge_failed_at = time.monotonic()
                 log.warning("Anons üretilemedi (%s): %s", eng, exc)
     return None
 
