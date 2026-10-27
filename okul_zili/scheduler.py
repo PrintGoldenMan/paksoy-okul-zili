@@ -66,8 +66,20 @@ class BellScheduler:
                 self._fired.clear()
             cfg = self._get_config()
             self._date = now.date()
-            self._events = schedule.events_for_date(cfg, self._date)
             self._dirty = False
+            try:
+                self._events = schedule.events_for_date(cfg, self._date)
+            except Exception:  # noqa: BLE001 - bozuk bir ayar yüzünden bütün gün zil susmasın
+                log.exception("Zil çizelgesi hesaplanamadı; varsayılan ders saatleri kullanılıyor")
+                from . import config
+                fallback = config.default_config()
+                for key in ("bells", "master_volume", "tts", "auto_ring", "skip_date"):
+                    if key in cfg:
+                        fallback[key] = cfg[key]
+                try:
+                    self._events = schedule.events_for_date(fallback, self._date)
+                except Exception:  # noqa: BLE001
+                    self._events = schedule.events_for_date(config.default_config(), self._date)
             # Program açıldığında zamanı çoktan geçmiş zilleri "çalındı" say.
             sec = now.hour * 3600 + now.minute * 60 + now.second
             for e in self._events:

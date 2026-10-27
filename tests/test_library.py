@@ -93,6 +93,16 @@ class SectionTests(unittest.TestCase):
             with self.assertRaises(D.DownloadError, msg=bad):
                 D.parse_time(bad)
 
+    def test_parse_time_rejects_non_numbers_and_accepts_turkish_dot(self):
+        from okul_zili import downloader as D
+        self.assertEqual(D.parse_time("5.30"), 330)       # Türkçe saat yazımı
+        self.assertEqual(D.parse_time("5:30.5"), 330.5)
+        for bad in ("inf", "nan", "1e3", "5,30:00"):
+            with self.assertRaises(D.DownloadError, msg=bad):
+                D.parse_time(bad)
+        self.assertEqual(D.fmt_time(59.99), "1:00")
+        self.assertEqual(D.fmt_time(0.96), "0:01")
+
     def test_parse_section_checks(self):
         from okul_zili import downloader as D
         self.assertEqual(D.parse_section("5:30", "5:35"), (330, 335))
@@ -152,6 +162,7 @@ class SectionDownloadTests(unittest.TestCase):
             item = downloader.download(url, section=downloader.parse_section("0:21", "0:26"))
         finally:
             server.shutdown()
+            server.server_close()
         self.assertAlmostEqual(item["duration"], 5.0, delta=0.4)
         self.assertIn("(0:21–0:26)", item["title"])
         self.assertRegex(item["file"], r"^parca-0-21-0-26-[0-9a-f]{6}\.opus$")

@@ -227,7 +227,7 @@ class LibraryWindow(ctk.CTkToplevel):
         msg = f"«{item['title']}» kütüphaneden silinsin mi?"
         if used:
             msg += ("\n\nBu ses şu zillerde kullanılıyor: " + ", ".join(used) +
-                    ".\nSilinirse bu ziller için yeni ses seçene kadar Windows uyarı sesi çalar.")
+                    ".\nSilinirse bu ziller için yeni bir ses seçilene kadar Windows uyarı sesi çalar.")
         if not messagebox.askyesno("Sesi sil", msg, icon="warning", parent=self):
             return
         self.app.player.stop_preview()
@@ -490,7 +490,7 @@ class LibraryWindow(ctk.CTkToplevel):
         self._set_busy(True)
         self.progress.configure(mode="indeterminate")
         self.progress.start()
-        self._show_status("Ses dosyası dönüştürülüyor…")
+        self._show_status("Ses dönüştürülüyor…")
 
         def done(item, error):
             self.progress.stop()

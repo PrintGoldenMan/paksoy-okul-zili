@@ -158,6 +158,26 @@ class ConfigFileTests(unittest.TestCase):
         self.assertFalse(cfg["auto_ring"])
         self.assertEqual(len(schedule.events_for_date(cfg, MONDAY)), 24)
 
+    def test_null_and_broken_entries_do_not_stop_bells(self):
+        self._write('{"timing": {"lunch_after": null, "lesson_count": null}, '
+                    '"manual_lessons": [["09:00"], ["10:00", "09:00"], 5], "schedule_mode": "manual", '
+                    '"day_overrides": {"0": [["x", "y"]], "9": [["08:00", "08:40"]]}, '
+                    '"holidays": [null, {"start": "2026-10-29"}], "extra_bells": [null], '
+                    '"profile_dates": [null, 3], "disabled_bells": {"all": 5}, '
+                    '"bells": {"ogretmen": {"rotation": {"enabled": true, "pool": [123, null]}}}}')
+        cfg = config.load()
+        self.assertEqual(cfg["timing"]["lunch_after"], 5)
+        self.assertEqual(cfg["manual_lessons"], config.DEFAULTS["manual_lessons"])
+        self.assertEqual(cfg["day_overrides"], {})
+        self.assertEqual(len(cfg["holidays"]), 1)
+        events = schedule.events_for_date(cfg, MONDAY)
+        self.assertEqual(len(events), 24)
+        player = FakePlayer()
+        s = BellScheduler(lambda: cfg, player)
+        for sec in range(0, 4 * 60):
+            s._tick(dt.datetime(2026, 10, 26, 9, 17, 0) + dt.timedelta(seconds=sec))
+        self.assertEqual(player.rung, ["09:18 ogrenci", "09:20 ogretmen"])
+
     def test_non_object_file_gives_defaults(self):
         self._write("[]")
         self.assertEqual(config.load()["school_name"], config.DEFAULTS["school_name"])
@@ -204,3 +224,11 @@ class SchedulerTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TurkishTests(unittest.TestCase):
+    def test_ordinals(self):
+        from okul_zili.turkish import ordinal_word
+        self.assertEqual([ordinal_word(n) for n in (1, 3, 4, 10, 12, 13, 20, 40, 99)],
+                         ["birinci", "üçüncü", "dördüncü", "onuncu", "on ikinci", "on üçüncü", "yirminci",
+                          "kırkıncı", "doksan dokuzuncu"])

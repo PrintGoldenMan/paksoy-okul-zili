@@ -898,7 +898,7 @@ class SettingsWindow(ctk.CTkToplevel):
                           off_voices=off_voices)
 
         b = self._card(f, "Anons Metinleri",
-                       "Metinlerde şu kısaltmaları kullanabilirsiniz:  {ders_sira} → «üçüncü»,  "
+                       "Metinlerde şu yer tutucuları kullanabilirsiniz:  {ders_sira} → «üçüncü»,  "
                        "{ders} → «3»,  {saat} → «10:10».")
         texts = {}
         r = 0
@@ -1407,7 +1407,7 @@ class SettingsWindow(ctk.CTkToplevel):
 
     def _cancel(self):
         if self._snapshot() != self._baseline and not messagebox.askyesno(
-                "Kaydedilmemiş değişiklikler", "Yaptığınız değişiklikler kaydedilmedi.\n\n"
+                "Kaydedilmemiş değişiklikler", "Yaptığınız değişiklikler henüz kaydedilmedi.\n\n"
                                               "Kaydetmeden kapatılsın mı?", icon="warning", parent=self):
             return
         self.app.player.stop_preview()

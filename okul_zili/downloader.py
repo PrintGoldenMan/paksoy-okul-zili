@@ -303,14 +303,24 @@ def probe(url: str, cancel=None) -> Probe:
 
 # -- bölüm (başlangıç–bitiş) ------------------------------------------------------------------------
 
+_TIME_PART = re.compile(r"^\d+(\.\d+)?$")
+
+
 def parse_time(text: str) -> float:
-    """«5:30», «1:05:30», «330» ya da «5:30,5» → saniye."""
-    raw = (text or "").strip().replace(",", ".")
+    """«5:30», «5.30», «1:05:30», «330» ya da «5:30,5» → saniye.
+
+    Türkiye'de saat «5.30» diye de yazıldığından iki nokta yoksa nokta ayraç sayılır;
+    saniyenin kesirli kısmı virgülle yazılır («5:30,5»)."""
+    raw = (text or "").strip()
     if not raw:
         raise DownloadError("Başlangıç ve bitiş zamanını yazın (ör. 5:30).")
-    parts = raw.split(":")
+    if ":" not in raw:
+        raw = raw.replace(".", ":")
+    raw = raw.replace(",", ".")
+    parts = [p.strip() for p in raw.split(":")]
     try:
-        if len(parts) > 3 or any(p.strip() == "" for p in parts):
+        # Yalnızca rakam (ve son parçada kesir) kabul edilir: «inf», «nan», «-5», «1e3» reddedilir.
+        if len(parts) > 3 or not all(_TIME_PART.match(p) for p in parts) or any("." in p for p in parts[:-1]):
             raise ValueError
         nums = [float(p) for p in parts]
     except ValueError:
@@ -324,14 +334,13 @@ def parse_time(text: str) -> float:
 
 
 def fmt_time(seconds: float) -> str:
-    seconds = max(0.0, float(seconds))
-    whole = int(seconds)
-    frac = seconds - whole
+    tenths = int(round(max(0.0, float(seconds)) * 10))   # önce yuvarla: 59,99 → «1:00»
+    whole, frac = divmod(tenths, 10)
     h, rem = divmod(whole, 3600)
     m, s = divmod(rem, 60)
     text = f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
-    if frac >= 0.05:
-        text += f",{int(round(frac * 10)) % 10}"
+    if frac:
+        text += f",{frac}"
     return text
 
 

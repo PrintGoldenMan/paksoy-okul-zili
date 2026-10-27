@@ -153,13 +153,74 @@ def _merge(defaults, loaded):
 
 
 def _same_type(default, value) -> bool:
-    if default is None or value is None:
-        return True
+    if default is None:
+        return True          # varsayılanı boş olan ayarlar (ör. skip_date) her değeri alabilir
+    if value is None:
+        return False         # elle yazılmış «null», sayı/yazı beklenen yerde kabul edilmez
     if isinstance(default, bool) or isinstance(value, bool):
         return isinstance(default, bool) == isinstance(value, bool)
     if isinstance(default, (int, float)):
         return isinstance(value, (int, float))
     return isinstance(value, type(default))
+
+
+def _valid_rows(rows) -> list:
+    """Ders saati satırlarından yalnızca ["SS:DD", "SS:DD"] biçiminde ve bitişi başlangıçtan sonra olanlar."""
+    out = []
+    for row in rows if isinstance(rows, list) else []:
+        if not (isinstance(row, (list, tuple)) and len(row) == 2 and all(isinstance(x, str) for x in row)):
+            continue
+        try:
+            h1, m1 = (int(x) for x in row[0].replace(".", ":").split(":"))
+            h2, m2 = (int(x) for x in row[1].replace(".", ":").split(":"))
+        except ValueError:
+            continue
+        if 0 <= h1 < 24 and 0 <= h2 < 24 and 0 <= m1 < 60 and 0 <= m2 < 60 and h2 * 60 + m2 > h1 * 60 + m1:
+            out.append([row[0], row[1]])
+    return out
+
+
+def _sanitize(cfg: dict) -> dict:
+    """Elle düzenlenmiş ayar dosyasındaki bozuk liste öğelerini atar; ziller bir hata yüzünden durmasın."""
+    def dicts(value):
+        return [x for x in value if isinstance(x, dict)] if isinstance(value, list) else []
+
+    cfg["manual_lessons"] = _valid_rows(cfg.get("manual_lessons"))
+    if not cfg["manual_lessons"]:
+        cfg["manual_lessons"] = copy.deepcopy(DEFAULTS["manual_lessons"])
+    overrides = cfg.get("day_overrides") if isinstance(cfg.get("day_overrides"), dict) else {}
+    cfg["day_overrides"] = {str(k): rows for k, v in overrides.items()
+                            if str(k) in {str(i) for i in range(7)} and (rows := _valid_rows(v))}
+    cfg["active_days"] = sorted({d for d in cfg.get("active_days", []) if isinstance(d, int) and 0 <= d <= 6})
+    cfg["holidays"] = [h for h in dicts(cfg.get("holidays")) if isinstance(h.get("start"), str)]
+    cfg["extra_bells"] = [e for e in dicts(cfg.get("extra_bells"))
+                          if isinstance(e.get("time"), str) and isinstance(e.get("days", []), list)]
+    cfg["profile_dates"] = [d for d in dicts(cfg.get("profile_dates"))
+                            if isinstance(d.get("date"), str) and isinstance(d.get("profile"), str)]
+    profiles = cfg.get("profiles") if isinstance(cfg.get("profiles"), dict) else {}
+    cfg["profiles"] = {}
+    for name, p in profiles.items():
+        if isinstance(p, dict):
+            # Eksik ya da bozuk program ayarları güncel ayarlarla tamamlanır.
+            fixed = _merge({k: cfg[k] for k in PROFILE_KEYS}, p)
+            fixed["manual_lessons"] = _valid_rows(fixed.get("manual_lessons")) or cfg["manual_lessons"]
+            cfg["profiles"][str(name)] = fixed
+    disabled = cfg.get("disabled_bells") if isinstance(cfg.get("disabled_bells"), dict) else {}
+    cfg["disabled_bells"] = {str(k): [x for x in v if isinstance(x, str)]
+                             for k, v in disabled.items() if isinstance(v, list)}
+    skip = cfg.get("skip_today")
+    if not isinstance(skip, dict) or not isinstance(skip.get("ids", []), list):
+        cfg["skip_today"] = {"date": None, "ids": []}
+    for bell in cfg.get("bells", {}).values():
+        rot = bell.get("rotation")
+        if not isinstance(rot, dict):
+            bell["rotation"] = _rotation_default()
+            continue
+        rot["pool"] = [s for s in rot.get("pool") or [] if isinstance(s, str)] if isinstance(rot.get("pool"), list) else []
+        for key in ("current", "key", "period"):
+            if not isinstance(rot.get(key), str):
+                rot[key] = _rotation_default()[key]
+    return cfg
 
 
 def _migrate(cfg: dict) -> dict:
@@ -184,7 +245,7 @@ def load() -> dict:
             data = json.load(f)
         if not isinstance(data, dict):
             raise ValueError("ayar dosyası bir nesne değil")
-        return _migrate(_merge(DEFAULTS, data))
+        return _sanitize(_migrate(_merge(DEFAULTS, data)))
     except (OSError, ValueError) as exc:
         log.error("Ayarlar okunamadı, varsayılanlar kullanılıyor: %s", exc)
         backup = path.with_suffix(".bozuk.json")
@@ -210,7 +271,7 @@ def import_from(file_path) -> dict:
         data = json.load(f)
     if not isinstance(data, dict):
         raise ValueError("Bu dosya bir Okul Zili ayar dosyası değil.")
-    return _migrate(_merge(DEFAULTS, data))
+    return _sanitize(_migrate(_merge(DEFAULTS, data)))
 
 
 def export_to(cfg: dict, file_path) -> None:
