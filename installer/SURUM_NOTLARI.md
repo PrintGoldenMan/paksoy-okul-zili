@@ -20,6 +20,9 @@ Program kendi zil sesiyle gelmez; sesleri siz seçersiniz:
    (ya da **«Bilgisayardan ekle…»** ile USB bellekteki bir dosyayı seçin).
 3. İndirme bitince çıkan **Öğrenci Zili / Öğretmen Zili / Çıkış Zili** düğmelerinden birine basın.
 
+Şarkının yalnızca bir kısmını istiyorsanız «Yalnızca bir bölümünü indir» kutusunu işaretleyip başlangıç ve
+bitişi yazın (ör. 5:30 – 5:35).
+
 Ses seçilmemiş zil sessiz kalmaz, Windows uyarı sesi çalar; ana ekranda sarı uyarı görünür.
 Oynatma listesi bağlantısı yapıştırılırsa program iki kez uyarır.
 

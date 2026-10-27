@@ -45,6 +45,7 @@ class LibraryWindow(ctk.CTkToplevel):
         self._cancel = None               # sürmekte olan indirmenin iptal işareti
         self._busy = False
         self._last_added = None
+        self._section_request = None
 
         self.title("Okul Zili – Ses Kütüphanesi")
         fit_to_screen(self, 920, 760)
@@ -90,6 +91,24 @@ class LibraryWindow(ctk.CTkToplevel):
         self.download_btn = ctk.CTkButton(row, text="⬇  İndir", width=120, height=38, font=theme.font(15, "bold"),
                                           command=self._start)
         self.download_btn.grid(row=0, column=2, padx=(8, 0))
+
+        # İsteğe bağlı bölüm seçimi (yalnızca tek ses bağlantılarında)
+        sec = ctk.CTkFrame(row, fg_color="transparent")
+        sec.grid(row=1, column=0, columnspan=3, sticky="w", pady=(10, 0))
+        self.section_var = ctk.BooleanVar(value=False)
+        self.section_cb = ctk.CTkCheckBox(sec, text="Yalnızca bir bölümünü indir", variable=self.section_var,
+                                          command=self._toggle_section)
+        self.section_cb.pack(side="left")
+        ctk.CTkLabel(sec, text="Başlangıç").pack(side="left", padx=(18, 6))
+        self.start_e = ctk.CTkEntry(sec, width=90, justify="center", placeholder_text="5:30")
+        self.start_e.pack(side="left")
+        ctk.CTkLabel(sec, text="–  Bitiş").pack(side="left", padx=6)
+        self.end_e = ctk.CTkEntry(sec, width=90, justify="center", placeholder_text="5:35")
+        self.end_e.pack(side="left")
+        self.section_hint = ctk.CTkLabel(sec, text="dakika:saniye  (tek şarkı bağlantılarında; listelerde olmaz)",
+                                         text_color=theme.MUTED, font=theme.font(12))
+        self.section_hint.pack(side="left", padx=(10, 0))
+        self._toggle_section()
 
         self.progress = ctk.CTkProgressBar(b, height=10)
         self.status = ctk.CTkLabel(b, text="", anchor="w", justify="left", wraplength=780)
@@ -217,6 +236,18 @@ class LibraryWindow(ctk.CTkToplevel):
 
     # -- indirme ------------------------------------------------------------------------------
 
+    def _toggle_section(self):
+        state = "normal" if self.section_var.get() and not self._busy else "disabled"
+        for e in (self.start_e, self.end_e):
+            e.configure(state=state)
+        if self.section_var.get() and not self._busy:
+            self.start_e.focus_set()
+
+    def _section_texts(self):
+        if not self.section_var.get():
+            return None
+        return self.start_e.get(), self.end_e.get()
+
     def _paste(self):
         try:
             text = self.clipboard_get()
@@ -228,8 +259,9 @@ class LibraryWindow(ctk.CTkToplevel):
     def _set_busy(self, busy):
         self._busy = busy
         state = "disabled" if busy else "normal"
-        for w in (self.url, self.download_btn, self.paste_btn, self.file_btn, self.update_btn):
+        for w in (self.url, self.download_btn, self.paste_btn, self.file_btn, self.update_btn, self.section_cb):
             w.configure(state=state)
+        self._toggle_section()
         if busy:
             self.assign_bar.grid_remove()
             self.progress.grid(row=1, column=0, sticky="ew", pady=(12, 4))
@@ -290,6 +322,14 @@ class LibraryWindow(ctk.CTkToplevel):
         if not url:
             self._show_status("Önce bir bağlantı yapıştırın.", theme.DANGER)
             return
+        texts = self._section_texts()
+        if texts:
+            try:  # biçim hatalarını indirmeye başlamadan göster
+                downloader.parse_section(*texts)
+            except downloader.DownloadError as exc:
+                self._show_status(str(exc), theme.DANGER)
+                return
+        self._section_request = texts
         self._set_busy(True)
         self._show_status("Bağlantı kontrol ediliyor…")
         self.progress.configure(mode="indeterminate")
@@ -302,6 +342,13 @@ class LibraryWindow(ctk.CTkToplevel):
         if error:
             self._finish_error(error)
             return
+        texts = self._section_request
+        if probe.is_playlist and texts:
+            self._set_busy(False)
+            self._show_status("Bölüm seçimi yalnızca tek şarkı / tek ses bağlantılarında kullanılabilir; bu bağlantı "
+                              "bir oynatma listesi. Listeyi indirmek için «Yalnızca bir bölümünü indir» işaretini "
+                              "kaldırın ya da şarkının kendi bağlantısını yapıştırın.", theme.DANGER)
+            return
         if probe.is_playlist:
             self.progress.set(0)
             self._show_status("Bu bağlantı bir oynatma listesi – onayınız bekleniyor…")
@@ -311,7 +358,14 @@ class LibraryWindow(ctk.CTkToplevel):
                 return
             self._download_many(probe)
             return
-        if probe.duration and probe.duration > downloader.LONG_AUDIO_SECONDS:
+        section = None
+        if texts:
+            try:
+                section = downloader.parse_section(*texts, duration=probe.duration)
+            except downloader.DownloadError as exc:
+                self._finish_error(str(exc))
+                return
+        if section is None and probe.duration and probe.duration > downloader.LONG_AUDIO_SECONDS:
             if not messagebox.askyesno(
                     "Uzun ses", f"«{library.short_title(probe.title)}» {_fmt_long(probe.duration)} uzunluğunda.\n\n"
                                 f"Zil için genellikle kısa sesler kullanılır; uzun sesler indirmesi uzun sürer ve "
@@ -319,8 +373,9 @@ class LibraryWindow(ctk.CTkToplevel):
                 self._set_busy(False)
                 self._show_status("İndirme yapılmadı.", theme.MUTED)
                 return
-        self._show_status(f"İndiriliyor: {library.short_title(probe.title)}")
-        self._run(lambda cancel: downloader.download(probe.url, probe.title, self._progress, cancel),
+        part = f" ({downloader.fmt_time(section[0])}–{downloader.fmt_time(section[1])} bölümü)" if section else ""
+        self._show_status(f"İndiriliyor: {library.short_title(probe.title)}{part}")
+        self._run(lambda cancel: downloader.download(probe.url, probe.title, self._progress, cancel, section=section),
                   self._after_single)
 
     def _confirm_playlist(self, probe) -> bool:
@@ -383,6 +438,12 @@ class LibraryWindow(ctk.CTkToplevel):
             return
         self._added(item)
         self.url.delete(0, "end")
+        if self.section_var.get():  # bir sonraki indirmede yanlışlıkla aynı bölüm kullanılmasın
+            self.section_var.set(False)
+            for e in (self.start_e, self.end_e):
+                e.configure(state="normal")
+                e.delete(0, "end")
+            self._toggle_section()
 
     def _added(self, item):
         self._last_added = item["id"]

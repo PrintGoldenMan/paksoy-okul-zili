@@ -79,3 +79,86 @@ class LibraryTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SectionTests(unittest.TestCase):
+    def test_parse_time_formats(self):
+        from okul_zili import downloader as D
+        self.assertEqual(D.parse_time("5:30"), 330)
+        self.assertEqual(D.parse_time("05:30"), 330)
+        self.assertEqual(D.parse_time("1:05:30"), 3930)
+        self.assertEqual(D.parse_time("330"), 330)
+        self.assertEqual(D.parse_time("5:30,5"), 330.5)
+        for bad in ("", "abc", "5:75", "1:2:3:4", "-5", "5::3"):
+            with self.assertRaises(D.DownloadError, msg=bad):
+                D.parse_time(bad)
+
+    def test_parse_section_checks(self):
+        from okul_zili import downloader as D
+        self.assertEqual(D.parse_section("5:30", "5:35"), (330, 335))
+        self.assertEqual(D.parse_section("1:25", "1:40", duration=90), (85, 90))   # bitiş sona çekilir
+        for start, end in (("5:35", "5:30"), ("5:30", "5:30"), ("2:00", "2:05")):
+            with self.assertRaises(D.DownloadError):
+                D.parse_section(start, end, duration=90)
+        self.assertEqual(D.fmt_time(330), "5:30")
+        self.assertEqual(D.fmt_time(3930), "1:05:30")
+        self.assertEqual(D.fmt_time(330.5), "5:30,5")
+
+
+class SectionDownloadTests(unittest.TestCase):
+    """Yerel bir web sunucusundan yalnızca seçilen bölümün indirildiğini doğrular."""
+
+    def setUp(self):
+        self._home = tempfile.mkdtemp()
+        self._old = {k: os.environ.get(k) for k in ("HOME", "APPDATA", "NO_PROXY", "no_proxy")}
+        os.environ["HOME"] = os.environ["APPDATA"] = self._home
+        os.environ["NO_PROXY"] = os.environ["no_proxy"] = "127.0.0.1,localhost"
+        library._library = None
+
+    def tearDown(self):
+        for key, value in self._old.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+        library._library = None
+        shutil.rmtree(self._home, ignore_errors=True)
+
+    def test_only_selected_part_is_saved(self):
+        try:
+            import importlib
+            importlib.import_module("yt_dlp")
+            from okul_zili import downloader
+            ffmpeg = downloader.ffmpeg_exe()
+        except Exception:  # noqa: BLE001
+            self.skipTest("yt-dlp ya da ffmpeg yok")
+        import functools
+        import http.server
+        import threading
+        www = os.path.join(self._home, "www")
+        os.makedirs(www)
+        # 0–20 sn alçak ton, 20–30 sn yüksek ton, 30–60 sn alçak ton
+        subprocess.run([ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
+                        "-f", "lavfi", "-i", "sine=frequency=300:duration=20",
+                        "-f", "lavfi", "-i", "sine=frequency=1000:duration=10",
+                        "-f", "lavfi", "-i", "sine=frequency=300:duration=30",
+                        "-filter_complex", "[0][1][2]concat=n=3:v=0:a=1", os.path.join(www, "parca.mp3")],
+                       check=True)
+        handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=www)
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        try:
+            url = f"http://127.0.0.1:{server.server_address[1]}/parca.mp3"
+            item = downloader.download(url, section=downloader.parse_section("0:21", "0:26"))
+        finally:
+            server.shutdown()
+        self.assertAlmostEqual(item["duration"], 5.0, delta=0.4)
+        self.assertIn("(0:21–0:26)", item["title"])
+        self.assertRegex(item["file"], r"^parca-0-21-0-26-[0-9a-f]{6}\.opus$")
+        # Kaydedilen bölüm yüksek tonlu kısım olmalı (sıfır geçiş oranı ~0,042; alçak tonda ~0,0125)
+        path = str(library.library_dir() / item["file"])
+        import re
+        out = subprocess.run([ffmpeg, "-hide_banner", "-i", path, "-af", "astats", "-f", "null", "-"],
+                             capture_output=True, text=True).stderr
+        rate = float(re.findall(r"Zero crossings rate: ([0-9.]+)", out)[0])
+        self.assertGreater(rate, 0.03)

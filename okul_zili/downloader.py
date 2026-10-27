@@ -301,13 +301,76 @@ def probe(url: str, cancel=None) -> Probe:
     return Probe(url, False, info.get("title") or "Adsız ses", duration=info.get("duration"))
 
 
+# -- bölüm (başlangıç–bitiş) ------------------------------------------------------------------------
+
+def parse_time(text: str) -> float:
+    """«5:30», «1:05:30», «330» ya da «5:30,5» → saniye."""
+    raw = (text or "").strip().replace(",", ".")
+    if not raw:
+        raise DownloadError("Başlangıç ve bitiş zamanını yazın (ör. 5:30).")
+    parts = raw.split(":")
+    try:
+        if len(parts) > 3 or any(p.strip() == "" for p in parts):
+            raise ValueError
+        nums = [float(p) for p in parts]
+    except ValueError:
+        raise DownloadError(f"«{text}» geçerli bir zaman değil. Dakika:saniye biçiminde yazın (ör. 5:30 ya da 1:05:30).")
+    if any(n < 0 for n in nums) or any(n >= 60 for n in nums[1:]):
+        raise DownloadError(f"«{text}» geçerli bir zaman değil. Saniye ve dakika 0–59 arasında olmalı.")
+    seconds = 0.0
+    for n in nums:
+        seconds = seconds * 60 + n
+    return seconds
+
+
+def fmt_time(seconds: float) -> str:
+    seconds = max(0.0, float(seconds))
+    whole = int(seconds)
+    frac = seconds - whole
+    h, rem = divmod(whole, 3600)
+    m, s = divmod(rem, 60)
+    text = f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
+    if frac >= 0.05:
+        text += f",{int(round(frac * 10)) % 10}"
+    return text
+
+
+def parse_section(start_text: str, end_text: str, duration=None):
+    """(başlangıç, bitiş) saniye çiftini doğrular. duration biliniyorsa ona göre denetler."""
+    start, end = parse_time(start_text), parse_time(end_text)
+    if end <= start:
+        raise DownloadError("Bitiş zamanı başlangıçtan sonra olmalı.")
+    if end - start < 0.5:
+        raise DownloadError("Seçilen bölüm çok kısa; en az yarım saniye olmalı.")
+    if duration:
+        if start >= duration:
+            raise DownloadError(f"Bu ses {fmt_time(duration)} uzunluğunda; başlangıç ({fmt_time(start)}) "
+                                "bundan önce olmalı.")
+        end = min(end, float(duration))
+    return start, end
+
+
 # -- indirme ve dönüştürme ----------------------------------------------------------------------
 
-def download(url: str, title_hint: str = "", progress=None, cancel=None) -> dict:
-    """Tek bir sesi indirip kütüphaneye ekler; eklenen kaydı döndürür."""
+def download(url: str, title_hint: str = "", progress=None, cancel=None, section=None) -> dict:
+    """Tek bir sesi indirip kütüphaneye ekler; eklenen kaydı döndürür.
+
+    section=(başlangıç, bitiş) verilirse yalnızca o bölüm kaydedilir. Site izin veriyorsa yt-dlp
+    yalnızca o bölümü indirir (uzun videolarda çok daha hızlı); olmazsa tamamı indirilip kesilir."""
     import yt_dlp
     if _is_youtube(url):
         ensure_js_runtime(progress, cancel)
+    if section:
+        try:
+            return _download(yt_dlp, url, title_hint, progress, cancel, section, partial=True)
+        except Cancelled:
+            raise
+        except DownloadError as exc:
+            log.warning("Bölüm indirilemedi, tamamı indirilip kesilecek: %s", str(exc).splitlines()[0])
+    return _download(yt_dlp, url, title_hint, progress, cancel, section, partial=False)
+
+
+def _download(yt_dlp, url, title_hint, progress, cancel, section, partial):
 
     def hook(d):
         if cancel is not None and cancel.is_set():
@@ -321,6 +384,9 @@ def download(url: str, title_hint: str = "", progress=None, cancel=None) -> dict
         # Geçici dosya adı yalnızca kimlikten oluşur: uzun başlıklar Windows yol sınırına takılmaz.
         opts = dict(_base_opts(), format="bestaudio/best", outtmpl=os.path.join(tmp, "%(id).40B.%(ext)s"),
                     progress_hooks=[hook], windowsfilenames=True, trim_file_name=40)
+        if partial:
+            from yt_dlp.utils import download_range_func
+            opts.update(download_ranges=download_range_func(None, [section]), ffmpeg_location=ffmpeg_exe())
         try:
             with yt_dlp.YoutubeDL(opts) as ydl:
                 info = ydl.extract_info(url, download=True)
@@ -337,9 +403,18 @@ def download(url: str, title_hint: str = "", progress=None, cancel=None) -> dict
         if not src or not os.path.exists(src):
             raise DownloadError("İndirilen dosya bulunamadı.")
         title = info.get("title") or title_hint or "Adsız ses"
+        cut = None
+        if section:
+            title = f"{title} ({fmt_time(section[0])}–{fmt_time(section[1])})"
+            # İndirilen dosya yalnızca bölümse kesmeye gerek yok; tamamıysa burada kesilir.
+            got = _duration(Path(src))
+            wanted = section[1] - section[0]
+            if not partial or got is None or got > wanted + 3:
+                cut = section
         if progress:
             progress(0.88, "Ses dönüştürülüyor…")
-        return _convert_and_add(src, title, source=info.get("webpage_url") or url, cancel=cancel)
+        return _convert_and_add(src, title, source=info.get("webpage_url") or url, cancel=cancel, cut=cut,
+                                trim_silence=section is None)
 
 
 def import_file(path: str, cancel=None) -> dict:
@@ -348,14 +423,18 @@ def import_file(path: str, cancel=None) -> dict:
     return _convert_and_add(path, title, source=f"Bilgisayardan: {Path(path).name}", cancel=cancel)
 
 
-def _convert_and_add(src: str, title: str, source: str, cancel=None) -> dict:
+def _convert_and_add(src: str, title: str, source: str, cancel=None, cut=None, trim_silence=True) -> dict:
     lib = library.get_library()
     item_id, target = lib.new_target(title)
     tmp = target.with_name(target.stem + ".part.opus")
-    cmd = [ffmpeg_exe(), "-hide_banner", "-loglevel", "error", "-y", "-i", src, "-vn", "-sn", "-dn",
-           # baştaki sessizliği kırp (zil hemen duyulsun) ve ses düzeyini eşitle (şarkılar aynı yükseklikte)
-           "-af", "silenceremove=start_periods=1:start_threshold=-50dB,loudnorm=I=-14:TP=-1.5:LRA=11",
-           "-ar", "48000", "-ac", "2", "-c:a", "libopus", "-b:a", OPUS_BITRATE, "-f", "opus", str(tmp)]
+    # Ses düzeyini eşitle (şarkılar aynı yükseklikte). Bölüm seçilmediyse baştaki sessizliği de kırp
+    # (zil hemen duyulsun); bölüm seçildiyse tam seçilen saniyeden başlasın.
+    filters = "loudnorm=I=-14:TP=-1.5:LRA=11"
+    if trim_silence:
+        filters = "silenceremove=start_periods=1:start_threshold=-50dB," + filters
+    seek = ["-ss", f"{cut[0]:.3f}", "-to", f"{cut[1]:.3f}"] if cut else []
+    cmd = [ffmpeg_exe(), "-hide_banner", "-loglevel", "error", "-y", *seek, "-i", src, "-vn", "-sn", "-dn",
+           "-af", filters, "-ar", "48000", "-ac", "2", "-c:a", "libopus", "-b:a", OPUS_BITRATE, "-f", "opus", str(tmp)]
     proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, **_hidden_window_flags())
     while True:
         try:

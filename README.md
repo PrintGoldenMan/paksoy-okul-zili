@@ -19,6 +19,10 @@ Okul zillerini ders programına göre otomatik çalan, Türkçe arayüzlü masa�
     `istiklal-marsi-tbmm-resmi-kayit-4k-3fa9c2.opus`.
   - **Oynatma listesi** bağlantısında iki kez uyarı çıkar. «Vazgeç» büyük ve mavidir; onay düğmesi bilerek
     sade gridir ve ikinci uyarıda yer değiştirir, 5 saniye geri sayımdan sonra etkinleşir. En fazla 100 ses indirilir.
+  - **Bölüm seçimi:** «Yalnızca bir bölümünü indir» işaretlenip başlangıç–bitiş yazılırsa (ör. `5:30` – `5:35`;
+    `dk:sn`, `sa:dk:sn` ya da saniye) yalnızca o kısım kaydedilir. Site izin veriyorsa yalnızca o bölüm indirilir,
+    böylece uzun videolarda da hızlıdır. Bölüm seçiminde baştaki sessizlik kırpılmaz; ses tam seçilen saniyeden başlar.
+    Yalnızca tek ses bağlantılarında kullanılabilir, oynatma listelerinde kullanılamaz.
   - Hem şarkı hem liste içeren YouTube bağlantılarında (`watch?v=…&list=…`) yalnızca o şarkı indirilir.
   - Zil sesi seçilmemişse (ilk kurulumda olduğu gibi) zil sessiz kalmaz: Windows uyarı sesi çalar ve ana ekranda
     sarı uyarı görünür.

@@ -31,7 +31,8 @@ def short_file_stem(title: str, item_id: str) -> str:
     «İstiklal Marşı (TBMM Resmî Kayıt) | 4K Remastered Official Video» ->
     «istiklal-marsi-tbmm-resmi-kayit-4k-3fa9c2»
     """
-    text = (title or "").translate(_TR_MAP)
+    # Harf/rakam dışındaki her şey (tire, «–», «|» vb.) ayraç sayılır; sözcükler birbirine yapışmasın.
+    text = re.sub(r"[^\w]+", " ", (title or "").translate(_TR_MAP))
     text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode("ascii").lower()
     words = re.findall(r"[a-z0-9]+", text)
     stem = ""
