@@ -12,6 +12,7 @@ Okul zillerini ders programına göre otomatik çalan, Türkçe arayüzlü masa�
   - **Çıkış Zili:** Ders bittiğinde.
 - **Hazır zil sesleri:** Klasik okul zili, Ding-Dong, Westminster çan melodisi, neşeli melodi,
   elektronik zil, gong, kampana ve kısa bip. Ek dosya gerekmez. Her zil türüne farklı bir ses verilebilir.
+  Seslerin WAV dosyaları [`sesler/`](sesler/) klasöründedir.
 - **Türkçe sesli anons (isteğe bağlı):** Zilden sonra örneğin *«Sayın öğretmenlerimiz, üçüncü ders
   başlamıştır.»* gibi bir anons okunur. Metinler düzenlenebilir.
 - **Beş ayar düzeyi:** **Çok Kolay → Basit → Gelişmiş → Uzman → Profesyonel**
