@@ -1,11 +1,17 @@
 # Windows kurulum programını ve taşınabilir .exe'yi derleyip GitHub sürümü (Release) olarak yayınlar.
-# Tetikleme: "v1.2.3" biçiminde bir etiket (tag) gönderildiğinde.
+# Tetikleme: "v1.2.3" biçiminde bir etiket (tag) gönderildiğinde ya da Actions sekmesinden
+# «Run workflow» ile elle (bu durumda etiket okul_zili/__init__.py içindeki sürümden oluşturulur).
 name: Windows sürümü
 
 on:
   push:
     tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      publish:
+        description: "Derledikten sonra GitHub sürümü (Release) olarak yayınla"
+        type: boolean
+        default: true
 
 permissions:
   contents: write
@@ -87,9 +93,11 @@ jobs:
             dist/OkulZili-Tasinabilir-*.exe
 
       - name: GitHub sürümü yayınla
-        if: github.ref_type == 'tag'
+        if: github.ref_type == 'tag' || (github.event_name == 'workflow_dispatch' && inputs.publish)
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: v${{ steps.ver.outputs.version }}
+          target_commitish: ${{ github.sha }}
           name: Okul Zili ${{ steps.ver.outputs.version }}
           body_path: installer/SURUM_NOTLARI.md
           files: |
