@@ -27,7 +27,7 @@ LEVEL_DESCRIPTIONS = {
 # Zilin kaç saniye çalacağı. Ses daha kısaysa başa sarılarak tekrarlanır, daha uzunsa
 # süre dolunca yumuşakça kısılarak durdurulur.
 DEFAULT_RING_SECONDS = 3.5
-MIN_RING_SECONDS = 0.5
+MIN_RING_SECONDS = 1.5
 MAX_RING_SECONDS = 30.0
 
 

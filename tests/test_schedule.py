@@ -84,7 +84,8 @@ class ScheduleTests(unittest.TestCase):
         self.cfg["bells"]["ogrenci"]["duration"] = "7,5"
         events = schedule.events_for_date(self.cfg, MONDAY)
         self.assertEqual({e.kind: e.duration for e in events}, {"ogrenci": 7.5, "ogretmen": 30.0, "cikis": 3.5})
-        self.assertEqual(config.ring_seconds(0), 0.5)
+        self.assertEqual(config.ring_seconds(0), 1.5)
+        self.assertEqual(config.ring_seconds("1"), 1.5)
 
     def test_weekend_and_holiday(self):
         self.assertEqual(schedule.events_for_date(self.cfg, dt.date(2026, 10, 25)), [])

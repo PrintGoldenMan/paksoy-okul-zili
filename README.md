@@ -15,7 +15,7 @@ Okul zillerini ders programına göre otomatik çalan, Türkçe arayüzlü masa�
 - **Türkçe sesli anons (isteğe bağlı):** Zilden sonra örneğin *«Sayın öğretmenlerimiz, üçüncü ders
   başlamıştır.»* gibi bir anons okunur. Metinler düzenlenebilir.
 - **Beş ayar düzeyi:** **Çok Kolay → Basit → Gelişmiş → Uzman → Profesyonel**
-- **Zil çalma süresi:** Her zilin kaç saniye çalacağı ayarlanır (varsayılan **3,5 sn**, en az 0,5, en çok **30 sn**).
+- **Zil çalma süresi:** Her zilin kaç saniye çalacağı ayarlanır (varsayılan **3,5 sn**, en az **1,5 sn**, en çok **30 sn**).
   Ses bu süreden kısaysa başa sarılarak tekrarlanır, uzunsa süre dolunca yumuşakça kısılarak durur.
   Anons, zil bittikten sonra okunur.
 - **Sabah zilleri kapatılabilir:** 08:28 öğrenci zili ve 08:30 öğretmen zili ayrı ayrı açılıp kapatılabilir
