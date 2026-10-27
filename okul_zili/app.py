@@ -31,6 +31,9 @@ def _setup_logging():
 class App:
     def __init__(self):
         self.cfg = config.load()
+        if autostart.supported():
+            # Kurulum programı da otomatik başlatmayı açıp kapatabilir; kayıt defteri esas alınır.
+            self.cfg["autostart"] = autostart.is_enabled()
         self.now_playing = ""
         self.player = Player(lambda: self.cfg, on_state=self._on_player_state)
         self.scheduler = BellScheduler(lambda: self.cfg, self.player)

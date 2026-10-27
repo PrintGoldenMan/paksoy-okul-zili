@@ -2,12 +2,13 @@
 
 import datetime as dt
 import logging
+import os
 import time
 
 import customtkinter as ctk
 from tkinter import messagebox
 
-from .. import APP_NAME, __version__, config, schedule
+from .. import APP_NAME, __version__, config, paths, schedule
 from ..config import BELL_NAMES, LEVEL_NAMES
 from ..turkish import long_date
 from . import theme
@@ -26,6 +27,7 @@ class MainWindow(ctk.CTk):
         self.minsize(900, 580)
         self.configure(fg_color=theme.WINDOW_BG)
         self.protocol("WM_DELETE_WINDOW", self._on_close)
+        self._set_icon()
         self._schedule_signature = None
         self._row_widgets = []
         self._settings = None
@@ -64,6 +66,17 @@ class MainWindow(ctk.CTk):
         ctk.CTkButton(bar, text="⚙  Ayarlar", width=130, height=34, font=theme.font(14, "bold"),
                       fg_color="#ffffff", text_color="#1f3b63", hover_color="#dfe7f2",
                       command=self.open_settings).grid(row=0, column=3, rowspan=2, padx=(6, 18))
+
+    def _set_icon(self):
+        try:
+            if os.name == "nt":
+                self.iconbitmap(default=str(paths.resource("assets/okul_zili.ico")))
+            else:
+                import tkinter
+                self._icon_img = tkinter.PhotoImage(file=str(paths.resource("assets/okul_zili.png")))
+                self.iconphoto(True, self._icon_img)
+        except Exception:  # noqa: BLE001 - simge bulunamazsa varsayılan kalır
+            log.debug("Simge yüklenemedi", exc_info=True)
 
     # -- küçük ekran düzeni ----------------------------------------------------
 

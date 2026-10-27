@@ -10,6 +10,7 @@ if not exist .venv-build\Scripts\python.exe goto :python_yok
 .venv-build\Scripts\python -m pip install -r requirements.txt pyinstaller
 if errorlevel 1 goto :hata
 .venv-build\Scripts\pyinstaller --noconfirm --onefile --windowed --name OkulZili ^
+    --icon assets\okul_zili.ico --add-data "assets;assets" ^
     --collect-data customtkinter ^
     --collect-all edge_tts ^
     --collect-submodules pyttsx3 ^

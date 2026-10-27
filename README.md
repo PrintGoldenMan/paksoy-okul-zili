@@ -69,7 +69,20 @@ Okulun 10G ders programına göre (Pazartesi–Cuma):
 
 ## Kurulum (Windows)
 
-### Seçenek 1: Tek dosya (.exe) oluşturma
+### En kolay yol: hazır kurulum programı
+
+[**Sürümler (Releases)**](../../releases/latest) sayfasından **`OkulZili-Kurulum-….exe`** dosyasını indirip
+çift tıklayın. Windows «bilinmeyen yayımcı» uyarısı verirse **«Ek bilgi» → «Yine de çalıştır»** seçin.
+Kurulum sırasında «Bilgisayar açılınca otomatik başlasın» seçeneğini işaretli bırakın.
+Kurulum gerektirmeyen **`OkulZili-Tasinabilir-….exe`** de aynı sayfadadır.
+
+### Yeni sürüm yayınlama (geliştiriciler için)
+
+`okul_zili/__init__.py` içindeki `__version__` değerini artırıp aynı numarayla bir etiket gönderin
+(ör. `git tag v1.0.1 && git push origin v1.0.1`). GitHub Actions kurulum programını Windows'ta derler,
+testleri ve açılış denetimini çalıştırır ve sürümü otomatik olarak yayınlar (`.github/workflows/release.yml`).
+
+### Kendiniz derlemek isterseniz: tek dosya (.exe)
 
 1. [python.org](https://www.python.org/downloads/) adresinden Python 3.10 veya üstünü kurun
    (kurulumda **«Add Python to PATH»** kutusunu işaretleyin).

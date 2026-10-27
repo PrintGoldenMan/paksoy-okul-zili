@@ -24,6 +24,12 @@ def sub_dir(name: str) -> Path:
     return d
 
 
+def resource(relative: str) -> Path:
+    """Programla birlikte gelen dosyalar (ör. simge). PyInstaller ile paketlenince _MEIPASS altındadır."""
+    base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent))
+    return base / relative
+
+
 def config_file() -> Path:
     return data_dir() / "ayarlar.json"
 
