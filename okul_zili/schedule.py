@@ -191,7 +191,7 @@ def extra_events(cfg: dict, weekday: int) -> list:
         text = _fill(e.get("text", ""), 0, minute)
         out.append(BellEvent(
             minute=minute, kind="ek", label=e.get("label") or "Ek Zil", note="Ek zil",
-            sound=e.get("sound", "builtin:gong"), text=text,
+            sound=e.get("sound", ""), text=text,
             tts=bool(text) and cfg["tts"].get("enabled", False),
             duration=ring_seconds(e.get("duration")), volume=int(e.get("volume", 100)), extra=e,
         ))

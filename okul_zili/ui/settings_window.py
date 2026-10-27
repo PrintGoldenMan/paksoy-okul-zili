@@ -1,7 +1,7 @@
 """Ayarlar penceresi.
 
 Görünen sekmeler ve seçenekler seçilen ayar düzeyine göre değişir:
-  Basit    : Genel, Ders Saatleri (süreler), Zil Sesleri (hazır sesler)
+  Basit    : Genel, Ders Saatleri (süreler), Zil Sesleri (kütüphaneden)
   Gelişmiş : + ders saatlerini tek tek girme, kendi ses dosyaları, okul günleri,
              tatiller, Türkçe sesli anonslar
   Uzman    : + güne özel ders saatleri, ek ziller, zil tekrarı/ses düzeyi,
@@ -19,7 +19,7 @@ import sys
 import customtkinter as ctk
 from tkinter import filedialog, messagebox
 
-from .. import autostart, config, paths, schedule, sounds, tts
+from .. import autostart, config, library, paths, schedule, sounds, tts
 from ..config import (BELL_NAMES, BELL_TYPES, DEFAULT_RING_SECONDS, LEVEL_DESCRIPTIONS, LEVEL_NAMES, LEVELS,
                       MAX_RING_SECONDS, MIN_RING_SECONDS, ring_seconds)
 from ..schedule import fmt_hm, parse_hm
@@ -30,59 +30,63 @@ from .widgets import Card, Spin, fit_to_screen, labeled_row, time_entry
 LEVEL_RANK = {lv: i for i, lv in enumerate(LEVELS)}
 SHORT_DAYS = ["Pzt", "Sal", "Çar", "Per", "Cum", "Cmt", "Paz"]
 THEMES = {"system": "Sistem ile aynı", "light": "Açık", "dark": "Koyu"}
-CHOOSE_FILE = "Dosya seç…"
+OPEN_LIBRARY = "🎵 Kütüphaneyi aç / yeni ses ekle…"
 
 
 class SoundPicker(ctk.CTkFrame):
-    """Hazır ses / kendi dosyası seçimi ve dinleme düğmesi."""
+    """Kütüphaneden zil sesi seçimi ve dinleme düğmesi."""
 
-    def __init__(self, master, player, sound_id, allow_files, allow_none=True, duration_spin=None):
+    def __init__(self, master, player, sound_id, open_library=None, duration_spin=None):
         super().__init__(master, fg_color="transparent")
         self.player = player
         self.duration_spin = duration_spin
-        self.sound_id = sound_id or "builtin:klasik"
-        self.allow_files = allow_files
-        self.allow_none = allow_none
-        self.menu = ctk.CTkOptionMenu(self, width=250, command=self._on_select, dynamic_resizing=False)
+        self.open_library = open_library
+        self.sound_id = sound_id or ""
+        self.menu = ctk.CTkOptionMenu(self, width=280, command=self._on_select, dynamic_resizing=False)
         self.menu.pack(side="left")
         ctk.CTkButton(self, text="▶ Dinle", width=80, command=self._preview).pack(side="left", padx=(8, 0))
         self.length_lbl = ctk.CTkLabel(self, text="", text_color=theme.MUTED, font=theme.font(12))
         self.length_lbl.pack(side="left", padx=(8, 0))
-        self._refresh()
+        self.refresh()
 
     def _choices(self):
-        opts = [(f"builtin:{k}", v) for k, v in sounds.BUILTIN_SOUNDS.items()]
-        if self.sound_id.startswith("file:"):
-            opts.append((self.sound_id, sounds.display_name(self.sound_id)))
-        if self.allow_none:
-            opts.append((sounds.NO_SOUND, sounds.NO_SOUND_NAME))
+        """[(kimlik, menüde görünen ad)] – aynı adlı sesler numaralandırılır."""
+        opts, seen = [], {}
+        for item in library.get_library().items():
+            name = item["title"]
+            seen[name] = seen.get(name, 0) + 1
+            if seen[name] > 1:
+                name = f"{name} ({seen[name]})"
+            opts.append((library.PREFIX + item["id"], name))
+        opts.append((sounds.NO_SOUND, sounds.NO_SOUND_NAME))
+        if sounds.is_missing(self.sound_id):
+            opts.insert(0, (self.sound_id, sounds.display_name(self.sound_id)))
         return opts
 
-    def _refresh(self):
+    def refresh(self):
         opts = self._choices()
-        values = [name for _, name in opts] + ([CHOOSE_FILE] if self.allow_files else [])
+        values = [name for _, name in opts] + ([OPEN_LIBRARY] if self.open_library else [])
         self.menu.configure(values=values)
-        self.menu.set(sounds.display_name(self.sound_id))
+        self.menu.set(next((n for sid, n in opts if sid == self.sound_id), sounds.display_name(self.sound_id)))
+        missing = sounds.is_missing(self.sound_id)
+        self.menu.configure(fg_color=theme.WARNING if missing else theme.ACCENT,
+                            text_color=theme.WARNING_TEXT if missing else "white")
         self._show_length()
 
     def _show_length(self):
         n = sounds.length_seconds(self.sound_id)
-        text = f"(ses dosyası {n:.1f} sn)".replace(".", ",") if n else ""
+        text = f"(ses {n:.1f} sn)".replace(".", ",") if n else ""
         self.length_lbl.configure(text=text)
 
     def _on_select(self, name):
-        if name == CHOOSE_FILE:
-            path = filedialog.askopenfilename(
-                parent=self, title="Zil sesi seçin",
-                filetypes=[("Ses dosyaları", "*.mp3 *.wav *.ogg"), ("Tüm dosyalar", "*.*")])
-            if path:
-                self.sound_id = "file:" + path
-            self._refresh()
+        if name == OPEN_LIBRARY:
+            self.refresh()
+            self.open_library()
             return
         for sid, n in self._choices():
             if n == name:
                 self.sound_id = sid
-                self._show_length()
+                self.refresh()
                 return
 
     def _preview(self):
@@ -229,6 +233,7 @@ class SettingsWindow(ctk.CTkToplevel):
         if self.tabs is not None:
             self.tabs.destroy()
         self._collectors = []
+        self._pickers = []
         self.level_desc.configure(text=f"{LEVEL_NAMES[self.level]}: {LEVEL_DESCRIPTIONS[self.level]}")
         self.tabs = ctk.CTkTabview(self, fg_color=theme.WINDOW_BG, segmented_button_selected_color=theme.ACCENT)
         self.tabs.pack(fill="both", expand=True, padx=12)
@@ -254,6 +259,22 @@ class SettingsWindow(ctk.CTkToplevel):
             builder(frame)
         if keep and keep in [p[0] for p in pages]:
             self.tabs.set(keep)
+
+    def _open_library(self):
+        """Kütüphaneyi açar; kapanınca ses seçim kutuları yeni seslerle güncellenir."""
+        from .library_window import LibraryWindow
+        win = getattr(self, "_library_win", None)
+        if win is not None and win.winfo_exists():
+            win.lift()
+            return
+        self._library_win = LibraryWindow(self, self.app, allow_assign=False, on_close=self._refresh_pickers)
+
+    def _refresh_pickers(self):
+        if not self.winfo_exists():
+            return
+        for picker in getattr(self, "_pickers", []):
+            if picker.winfo_exists():
+                picker.refresh()
 
     def _rebuild(self):
         """Mevcut girişleri kaydedip sekmeleri yeniden çizer."""
@@ -551,9 +572,10 @@ class SettingsWindow(ctk.CTkToplevel):
             ctk.CTkLabel(opt, text="Çalma süresi:").pack(side="left")
             dur = duration_spin(opt, bell.get("duration"))
             dur.pack(side="left", padx=(6, 20))
-            picker = SoundPicker(b, self.app.player, bell["sound"], allow_files=self._at_least("gelismis"),
+            picker = SoundPicker(b, self.app.player, bell["sound"], open_library=self._open_library,
                                  duration_spin=dur)
             picker.grid(row=0, column=1, sticky="w")
+            self._pickers.append(picker)
             widgets = {"picker": picker, "duration": dur}
             if self._at_least("uzman"):
                 ctk.CTkLabel(opt, text="Bu zilin ses düzeyi:").pack(side="left")
@@ -852,7 +874,7 @@ class SettingsWindow(ctk.CTkToplevel):
 
         def add(e=None):
             e = e or {"enabled": True, "time": "08:20", "days": [0], "label": "Yeni zil",
-                      "sound": "builtin:gong", "text": "", "duration": DEFAULT_RING_SECONDS}
+                      "sound": "", "text": "", "duration": DEFAULT_RING_SECONDS}
             card = ctk.CTkFrame(holder, fg_color=theme.CARD_BG, corner_radius=12)
             card.grid(row=len(items) + 1, column=0, sticky="ew", pady=5, padx=4)
             line1 = ctk.CTkFrame(card, fg_color="transparent")
@@ -874,10 +896,11 @@ class SettingsWindow(ctk.CTkToplevel):
             line2 = ctk.CTkFrame(card, fg_color="transparent")
             line2.pack(fill="x", padx=12, pady=(0, 10))
             dur = duration_spin(line2, e.get("duration"))
-            picker = SoundPicker(line2, self.app.player, e.get("sound", "builtin:gong"), allow_files=True,
+            picker = SoundPicker(line2, self.app.player, e.get("sound", ""), open_library=self._open_library,
                                  duration_spin=dur)
             picker.length_lbl.pack_forget()
             picker.pack(side="left")
+            self._pickers.append(picker)
             ctk.CTkLabel(line2, text="Süre").pack(side="left", padx=(10, 4))
             dur.pack(side="left")
             text = ctk.CTkEntry(line2, width=230, placeholder_text="Anons metni (isteğe bağlı)")
@@ -916,13 +939,13 @@ class SettingsWindow(ctk.CTkToplevel):
         ctk.CTkButton(btns, text="Pazartesi bayrak töreni", fg_color="transparent", border_width=1,
                       text_color=theme.TEXT, command=lambda: add({
                           "enabled": True, "time": "08:20", "days": [0], "label": "Bayrak Töreni",
-                          "sound": "builtin:kampana",
+                          "sound": "",
                           "text": "Sevgili öğrenciler, bayrak töreni için okul bahçesinde toplanınız."})).pack(
             side="left", padx=8)
         ctk.CTkButton(btns, text="Cuma haftayı kapatma", fg_color="transparent", border_width=1,
                       text_color=theme.TEXT, command=lambda: add({
                           "enabled": True, "time": "15:25", "days": [4], "label": "Bayrak Töreni (Cuma)",
-                          "sound": "builtin:kampana",
+                          "sound": "",
                           "text": "Sevgili öğrenciler, haftayı kapatma töreni için hazırlanınız."})).pack(side="left")
 
         def collect():
@@ -1237,7 +1260,8 @@ class SettingsWindow(ctk.CTkToplevel):
         if not self._collect():
             return
         bells = self.cfg["bells"]
-        if bells["ogrenci"]["sound"] == bells["ogretmen"]["sound"] and bells["ogrenci"]["sound"] != sounds.NO_SOUND:
+        same = bells["ogrenci"]["sound"] == bells["ogretmen"]["sound"]
+        if same and bells["ogrenci"]["sound"] not in (sounds.NO_SOUND, "") and not sounds.is_missing(bells["ogrenci"]["sound"]):
             if not messagebox.askyesno(
                     "Aynı zil sesi", "Öğrenci zili ile öğretmen zili aynı sesi kullanıyor; ayırt etmek zor "
                                      "olabilir.\n\nYine de kaydedilsin mi?", parent=self):

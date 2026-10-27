@@ -119,7 +119,7 @@ class ScheduleTests(unittest.TestCase):
 
     def test_extra_bell(self):
         self.cfg["extra_bells"] = [{"enabled": True, "time": "08:20", "days": [0], "label": "Tören",
-                                    "sound": "builtin:gong", "text": ""}]
+                                    "sound": "", "text": ""}]
         events = schedule.events_for_date(self.cfg, MONDAY)
         self.assertEqual((events[0].time_str, events[0].kind), ("08:20", "ek"))
 

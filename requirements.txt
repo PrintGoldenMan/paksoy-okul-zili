@@ -4,3 +4,6 @@ edge-tts>=6.1
 pyttsx3>=2.90
 comtypes; sys_platform == "win32"
 pywin32; sys_platform == "win32"
+yt-dlp>=2025.11
+yt-dlp-ejs>=0.3
+imageio-ffmpeg>=0.5

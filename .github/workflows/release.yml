@@ -50,6 +50,7 @@ jobs:
           pyinstaller --noconfirm --clean --windowed --name OkulZili
           --icon assets/okul_zili.ico --add-data "assets;assets"
           --collect-data customtkinter --collect-all edge_tts
+          --collect-all yt_dlp --collect-all yt_dlp_ejs --collect-all imageio_ffmpeg
           --collect-submodules pyttsx3 --collect-submodules comtypes
           --hidden-import comtypes.stream --hidden-import win32com.client --hidden-import pythoncom
           main.py
@@ -59,6 +60,7 @@ jobs:
           pyinstaller --noconfirm --onefile --windowed --name OkulZili-Tasinabilir-${{ steps.ver.outputs.version }}
           --icon assets/okul_zili.ico --add-data "assets;assets"
           --collect-data customtkinter --collect-all edge_tts
+          --collect-all yt_dlp --collect-all yt_dlp_ejs --collect-all imageio_ffmpeg
           --collect-submodules pyttsx3 --collect-submodules comtypes
           --hidden-import comtypes.stream --hidden-import win32com.client --hidden-import pythoncom
           main.py
@@ -73,6 +75,18 @@ jobs:
           if ($p.HasExited) { throw "Program açıldıktan hemen sonra kapandı (çıkış kodu $($p.ExitCode))" }
           Stop-Process -Id $p.Id -Force
           Get-Content "$env:APPDATA\OkulZili\kayit.log" -ErrorAction SilentlyContinue
+
+      - name: İndirme ve ses parçaları paketlenmiş mi? (yt-dlp, ffmpeg, Opus)
+        shell: pwsh
+        run: |
+          foreach ($exe in @("dist\OkulZili\OkulZili.exe", "dist\OkulZili-Tasinabilir-${{ steps.ver.outputs.version }}.exe")) {
+            $out = "$env:RUNNER_TEMP\selftest.json"
+            Remove-Item $out -ErrorAction SilentlyContinue
+            $env:SDL_AUDIODRIVER = "dummy"
+            $p = Start-Process -FilePath $exe -ArgumentList "--oz-selftest", $out -PassThru -Wait
+            Get-Content $out
+            if ($p.ExitCode -ne 0) { throw "$exe öz denetimi başarısız" }
+          }
 
       - name: Kurulum programını derle (Inno Setup)
         shell: pwsh

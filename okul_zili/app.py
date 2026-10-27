@@ -3,12 +3,12 @@
 import logging
 import logging.handlers
 import os
+import shutil
 import sys
-import threading
 
 import customtkinter as ctk
 
-from . import APP_NAME, __version__, autostart, config, paths, sounds
+from . import APP_NAME, __version__, autostart, config, paths
 from .audio import Player
 from .config import BELL_NAMES, ring_seconds
 from .scheduler import BellScheduler
@@ -26,6 +26,14 @@ def _setup_logging():
     root.addHandler(handler)
     if sys.stderr is not None:
         root.addHandler(logging.StreamHandler())
+
+
+def _remove_old_builtin_sounds():
+    """Eski sürümlerin ürettiği hazır ses dosyalarını siler (artık kütüphane kullanılıyor)."""
+    old = paths.data_dir() / "hazir_sesler"
+    if old.exists():
+        shutil.rmtree(old, ignore_errors=True)
+        log.info("Eski hazır ses dosyaları silindi")
 
 
 class App:
@@ -82,8 +90,7 @@ class App:
         from .ui import theme
         theme.apply_overrides()
         ctk.set_appearance_mode({"light": "light", "dark": "dark"}.get(self.cfg["theme"], "system"))
-        # Hazır sesleri arka planda hazırla (ilk açılışta birkaç saniye sürer).
-        threading.Thread(target=sounds.ensure_all, name="ses-hazirlik", daemon=True).start()
+        _remove_old_builtin_sounds()
         from .ui.main_window import MainWindow
         self.window = MainWindow(self)
         self.scheduler.start()
@@ -122,7 +129,46 @@ def _show_already_running():
     root.destroy()
 
 
+def self_test(out_path):
+    """Paketlenmiş programın indirme/dönüştürme/çalma parçalarını dener (derleme denetimi için).
+    Sonuç JSON olarak out_path dosyasına yazılır; çıkış kodu 0 = başarılı."""
+    import json
+    import subprocess
+    import tempfile
+    result = {}
+    try:
+        from . import downloader
+        result["ytdlp"] = downloader.ytdlp_version()
+        import importlib
+        importlib.import_module("yt_dlp_ejs")  # YouTube için gerekli bileşen paketlenmiş mi?
+        result["ejs"] = True
+        ffmpeg = downloader.ffmpeg_exe()
+        result["ffmpeg"] = os.path.basename(ffmpeg)
+        with tempfile.TemporaryDirectory() as tmp:
+            out = os.path.join(tmp, "deneme.opus")
+            subprocess.run([ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i",
+                            "sine=frequency=440:duration=2", "-c:a", "libopus", "-b:a", "96k", out],
+                           check=True, **downloader._hidden_window_flags())
+            result["opus_bytes"] = os.path.getsize(out)
+            import pygame
+            if not pygame.mixer.get_init():
+                os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
+                pygame.mixer.init()
+            pygame.mixer.music.load(out)
+            pygame.mixer.music.unload()
+            result["opus_playable"] = True
+        result["ok"] = True
+    except Exception as exc:  # noqa: BLE001
+        result["ok"] = False
+        result["error"] = repr(exc)
+    with open(out_path, "w", encoding="utf-8") as f:
+        json.dump(result, f, ensure_ascii=False, indent=2)
+    return 0 if result["ok"] else 1
+
+
 def main():
+    if len(sys.argv) >= 3 and sys.argv[1] == "--oz-selftest":
+        sys.exit(self_test(sys.argv[2]))
     _setup_logging()
     if _already_running():
         log.info("Program zaten açık; ikinci kopya kapatıldı")

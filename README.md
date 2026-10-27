@@ -10,9 +10,25 @@ Okul zillerini ders programına göre otomatik çalan, Türkçe arayüzlü masa�
   - **Öğrenci Zili:** Teneffüs bitmeden 2 dakika önce (süre ayarlanabilir). Öğrenciler sınıfa girer.
   - **Öğretmen Zili:** Ders başladığında. Öğretmenler sınıfa girer.
   - **Çıkış Zili:** Ders bittiğinde.
-- **Hazır zil sesleri:** Klasik okul zili, Ding-Dong, Westminster çan melodisi, neşeli melodi,
-  elektronik zil, gong, kampana ve kısa bip. Ek dosya gerekmez. Her zil türüne farklı bir ses verilebilir.
-  Seslerin WAV dosyaları [`sesler/`](sesler/) klasöründedir.
+- **Ses Kütüphanesi:** Zil sesleri internetten eklenir. Ana ekrandaki **«🎵 Kütüphane»** düğmesine basın,
+  YouTube (veya yt-dlp'nin desteklediği başka bir site) bağlantısını yapıştırıp **«İndir»**e basın. Bilgisayardaki
+  ya da USB bellekteki ses dosyaları da eklenebilir. Her zil türüne farklı bir ses verilebilir.
+  - Sesler **Opus** biçiminde (96 kbit/s, dakikası yaklaşık 0,7 MB) kaydedilir; baştaki sessizlik kırpılır ve
+    ses düzeyleri eşitlenir, böylece her şarkı aynı yükseklikte ve hemen başlar.
+  - Uzun adlar kısaltılır: «İstiklal Marşı (TBMM Resmî Kayıt) | 4K Remastered…» →
+    `istiklal-marsi-tbmm-resmi-kayit-4k-3fa9c2.opus`.
+  - **Oynatma listesi** bağlantısında iki kez uyarı çıkar. «Vazgeç» büyük ve mavidir; onay düğmesi bilerek
+    sade gridir ve ikinci uyarıda yer değiştirir, 5 saniye geri sayımdan sonra etkinleşir. En fazla 100 ses indirilir.
+  - Hem şarkı hem liste içeren YouTube bağlantılarında (`watch?v=…&list=…`) yalnızca o şarkı indirilir.
+  - Zil sesi seçilmemişse (ilk kurulumda olduğu gibi) zil sessiz kalmaz: Windows uyarı sesi çalar ve ana ekranda
+    sarı uyarı görünür.
+  - YouTube için gereken Deno çalıştırıcısı ilk YouTube indirmesinde bir kez otomatik indirilir (~40 MB).
+    YouTube değiştiğinde Kütüphane penceresindeki **«yt-dlp'yi güncelle»** düğmesiyle indirici güncellenir.
+
+| Ses Kütüphanesi | Oynatma listesi ikinci uyarısı (geri sayımlı) |
+|---|---|
+| ![Kütüphane](docs/kutuphane.png) | ![Oynatma listesi uyarısı](docs/oynatma_listesi_uyari.png) |
+
 - **Türkçe sesli anons (isteğe bağlı):** Zilden sonra örneğin *«Sayın öğretmenlerimiz, üçüncü ders
   başlamıştır.»* gibi bir anons okunur. Metinler düzenlenebilir.
 - **Beş ayar düzeyi:** **Çok Kolay → Basit → Gelişmiş → Uzman → Profesyonel**
@@ -49,7 +65,7 @@ Kapatılan ziller ana ekranda gri ve «Kapalı» olarak görünmeye devam eder.
 |---|---|
 | ![Çok Kolay](docs/ayarlar_cok_kolay.png) | ![Zil Listesi](docs/ayarlar_zil_listesi.png) |
 
-| Zil Sesleri ve çalma süresi | Profesyonel – Zil Programları |
+| Zil Sesleri (kütüphaneden seçim) ve çalma süresi | Profesyonel – Zil Programları |
 |---|---|
 | ![Zil Sesleri](docs/ayarlar_zil_sesleri.png) | ![Programlar](docs/ayarlar_programlar.png) |
 
@@ -104,7 +120,7 @@ Python kuruluysa **`baslat.bat`** dosyasına çift tıklayın. İlk açılışta
 
 ## Veriler
 
-Ayarlar, hazır sesler, anons önbelleği ve kayıtlar `%APPDATA%\OkulZili` klasöründe tutulur.
+Ayarlar, ses kütüphanesi (`kutuphane`), anons önbelleği ve kayıtlar `%APPDATA%\OkulZili` klasöründe tutulur.
 Programın yanına `tasinabilir.txt` adlı boş bir dosya koyarsanız veriler programın yanındaki
 `veriler` klasörüne yazılır (USB bellekte taşımak için).
 
@@ -121,6 +137,8 @@ python -m unittest discover -s tests    # testleri çalıştırır
 | `okul_zili/schedule.py` | Ders saatlerinden günlük zil listesini hesaplar |
 | `okul_zili/scheduler.py` | Saati izler, zamanı gelen zili çalar |
 | `okul_zili/audio.py` | Zil ve anonsları sırayla çalar (pygame) |
-| `okul_zili/sounds.py` | Hazır zil seslerini üretir |
+| `okul_zili/sounds.py` | Zil sesi kimliklerini kütüphanedeki dosyalara çevirir |
+| `okul_zili/library.py` | Ses kütüphanesi (kayıt listesi, kısa dosya adları) |
+| `okul_zili/downloader.py` | yt-dlp ile indirme, ffmpeg ile Opus'a dönüştürme, yt-dlp/Deno güncelleme |
 | `okul_zili/tts.py` | Türkçe sesli anons (edge-tts / pyttsx3) |
 | `okul_zili/ui/` | Arayüz (customtkinter) |

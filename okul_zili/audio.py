@@ -3,6 +3,7 @@
 import logging
 import os
 import queue
+import sys
 import threading
 import time
 
@@ -129,7 +130,11 @@ class Player:
                     self._play_event(cfg, a, b, gen)
                 elif kind == "sound":
                     self._set_state(True, sounds.display_name(a))
-                    self._play_file(sounds.resolve(a), cfg["master_volume"], gen, duration=b)
+                    path = sounds.resolve(a)
+                    if path is None and not sounds.is_silent(a):
+                        self._warning_beep(b or 3.5, gen)
+                    elif not self._play_file(path, cfg["master_volume"], gen, duration=b):
+                        self._warning_beep(b or 3.5, gen)
                 elif kind in ("say", "trysay"):
                     self._set_state(True, "Anons")
                     self._announce(cfg if b is None else dict(cfg, tts=b), a, gen)
@@ -150,16 +155,32 @@ class Player:
         self._set_state(True, event.label)
         volume = cfg["master_volume"] * event.volume / 100
         path = sounds.resolve(event.sound)
-        if path is not None and not self._play_file(path, volume, gen, duration=event.duration):
-            # Ses dosyası bozuk/okunamıyor: zil yine de çalsın.
-            log.warning("Zil sesi çalınamadı, klasik zil çalınıyor: %s", path)
-            self._play_file(sounds.builtin_path("klasik"), volume, gen, duration=event.duration)
+        if sounds.is_silent(event.sound):
+            pass  # yalnızca anons
+        elif path is None:
+            # Ses seçilmemiş ya da kütüphaneden silinmiş: zil sessiz kalmasın.
+            log.warning("Zil sesi bulunamadı (%s), Windows uyarı sesi çalınıyor", event.sound or "seçilmedi")
+            self._warning_beep(event.duration, gen)
+        elif not self._play_file(path, volume, gen, duration=event.duration):
+            log.warning("Zil sesi çalınamadı, Windows uyarı sesi çalınıyor: %s", path)
+            self._warning_beep(event.duration, gen)
         if self._cancelled(gen):
             return
         if announce and event.tts and event.text:
             if path:
                 time.sleep(cfg["tts"].get("pause_ms", 400) / 1000)
             self._announce(cfg, event.text, gen)
+
+    def _warning_beep(self, duration, gen):
+        """Zil sesi yokken yedek olarak Windows'un kendi uyarı sesini, süre boyunca saniyede bir çalar."""
+        end = time.monotonic() + (duration or 3.5)
+        while time.monotonic() < end and not self._cancelled(gen):
+            try:
+                import winsound
+                winsound.MessageBeep(winsound.MB_ICONEXCLAMATION)
+            except ImportError:
+                sys.stdout and sys.stdout.write("\a")
+            time.sleep(1.0)
 
     def _announce(self, cfg, text, gen):
         if self._cancelled(gen):

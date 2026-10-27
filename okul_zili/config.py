@@ -74,16 +74,16 @@ DEFAULTS = {
     "day_overrides": {},
     "bells": {
         "ogrenci": {
-            "sound": "builtin:melodi", "duration": DEFAULT_RING_SECONDS, "volume": 100, "tts": True,
+            "sound": "", "duration": DEFAULT_RING_SECONDS, "volume": 100, "tts": True,
             "text": "Sevgili öğrenciler, {ders_sira} ders başlamak üzere. "
                     "Lütfen sınıflarınıza geçiniz.",
         },
         "ogretmen": {
-            "sound": "builtin:klasik", "duration": DEFAULT_RING_SECONDS, "volume": 100, "tts": True,
+            "sound": "", "duration": DEFAULT_RING_SECONDS, "volume": 100, "tts": True,
             "text": "Sayın öğretmenlerimiz, {ders_sira} ders başlamıştır.",
         },
         "cikis": {
-            "sound": "builtin:kampana", "duration": DEFAULT_RING_SECONDS, "volume": 100, "tts": True,
+            "sound": "", "duration": DEFAULT_RING_SECONDS, "volume": 100, "tts": True,
             "text": "{ders_sira} ders sona ermiştir. İyi teneffüsler.",
             "text_lunch": "Öğle arası başlamıştır. Afiyet olsun.",
             "text_last": "Bugünkü dersler sona ermiştir. İyi günler dileriz.",
@@ -100,7 +100,7 @@ DEFAULTS = {
     # [{"start": "2026-10-29", "end": "2026-10-29", "name": "Cumhuriyet Bayramı"}]
     "holidays": [],
     # [{"enabled": true, "time": "08:25", "days": [0], "label": "İstiklal Marşı",
-    #   "sound": "builtin:gong", "text": "", "duration": 3.5}]
+    #   "sound": "lib:<kimlik>", "text": "", "duration": 3.5}]
     "extra_bells": [],
     # Profesyonel düzey: kalıcı olarak kapatılan ziller, ör. {"all": ["cikis-8"], "4": ["ogrenci-6"]}
     # Kimlikler "tür-dersno" biçimindedir; böylece ders saatleri değişse de geçerli kalır.
@@ -154,6 +154,14 @@ def _same_type(default, value) -> bool:
     return isinstance(value, type(default))
 
 
+def _migrate(cfg: dict) -> dict:
+    """Eski sürümlerdeki program içi hazır seslerin («builtin:…») yerini «seçilmedi» alır."""
+    for bell in list(cfg.get("bells", {}).values()) + list(cfg.get("extra_bells", [])):
+        if isinstance(bell, dict) and str(bell.get("sound", "")).startswith("builtin:"):
+            bell["sound"] = ""
+    return cfg
+
+
 def default_config() -> dict:
     return copy.deepcopy(DEFAULTS)
 
@@ -168,7 +176,7 @@ def load() -> dict:
             data = json.load(f)
         if not isinstance(data, dict):
             raise ValueError("ayar dosyası bir nesne değil")
-        return _merge(DEFAULTS, data)
+        return _migrate(_merge(DEFAULTS, data))
     except (OSError, ValueError) as exc:
         log.error("Ayarlar okunamadı, varsayılanlar kullanılıyor: %s", exc)
         backup = path.with_suffix(".bozuk.json")
@@ -194,7 +202,7 @@ def import_from(file_path) -> dict:
         data = json.load(f)
     if not isinstance(data, dict):
         raise ValueError("Bu dosya bir Okul Zili ayar dosyası değil.")
-    return _merge(DEFAULTS, data)
+    return _migrate(_merge(DEFAULTS, data))
 
 
 def export_to(cfg: dict, file_path) -> None:

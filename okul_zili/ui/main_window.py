@@ -8,7 +8,7 @@ import time
 import customtkinter as ctk
 from tkinter import messagebox
 
-from .. import APP_NAME, __version__, config, paths, schedule
+from .. import APP_NAME, __version__, config, paths, schedule, sounds
 from ..config import BELL_NAMES, LEVEL_NAMES
 from ..turkish import long_date
 from . import theme
@@ -31,6 +31,7 @@ class MainWindow(ctk.CTk):
         self._schedule_signature = None
         self._row_widgets = []
         self._settings = None
+        self._library = None
         self._row_toggles = False
         self._flash_until = 0.0
         self._flash_text = ""
@@ -63,9 +64,12 @@ class MainWindow(ctk.CTk):
         self.level_btn = ctk.CTkButton(bar, text="", width=150, height=34, fg_color="#2c4f80",
                                        hover_color="#365e96", command=self.open_level_dialog)
         self.level_btn.grid(row=0, column=2, rowspan=2, padx=6)
+        ctk.CTkButton(bar, text="🎵  Kütüphane", width=140, height=34, font=theme.font(14, "bold"),
+                      fg_color="#2c4f80", hover_color="#365e96",
+                      command=self.open_library).grid(row=0, column=3, rowspan=2, padx=6)
         ctk.CTkButton(bar, text="⚙  Ayarlar", width=130, height=34, font=theme.font(14, "bold"),
                       fg_color="#ffffff", text_color="#1f3b63", hover_color="#dfe7f2",
-                      command=self.open_settings).grid(row=0, column=3, rowspan=2, padx=(6, 18))
+                      command=self.open_settings).grid(row=0, column=4, rowspan=2, padx=(6, 18))
 
     def _set_icon(self):
         try:
@@ -148,26 +152,41 @@ class MainWindow(ctk.CTk):
         self.banner_btn.grid(row=0, column=1, padx=20)
 
     def _update_banner(self, cfg, now):
+        danger = True
         if not cfg.get("auto_ring", True):
-            text, btn = "⚠  ZİLLER KAPALI – otomatik zil çalmayacak", "Zilleri aç"
+            text, btn, self._banner_kind = "⚠  ZİLLER KAPALI – otomatik zil çalmayacak", "Zilleri aç", "auto"
         elif cfg.get("skip_date") == now.date().isoformat():
-            text, btn = "⚠  BUGÜN ZİLLER KAPALI – yarın otomatik olarak açılır", "Bugün de çalsın"
+            text, btn, self._banner_kind = ("⚠  BUGÜN ZİLLER KAPALI – yarın otomatik olarak açılır",
+                                            "Bugün de çalsın", "skip")
         else:
-            text = None
+            missing = [BELL_NAMES[k] for k in config.BELL_TYPES if sounds.is_missing(cfg["bells"][k].get("sound", ""))]
+            if missing:
+                danger = False
+                self._banner_kind = "sound"
+                text = (f"🎵  Zil sesi seçilmedi: {', '.join(missing)} – şimdilik Windows uyarı sesi çalacak")
+                btn = "Kütüphaneyi aç"
+            else:
+                text = None
         if text is None:
             if self.banner.winfo_ismapped():
                 self.banner.grid_remove()
                 self.clock_card.configure(border_width=0)
             return
+        color = theme.DANGER if danger else theme.WARNING
         if self.banner_lbl.cget("text") != text:
-            self.banner_lbl.configure(text=text)
-            self.banner_btn.configure(text=btn)
+            self.banner_lbl.configure(text=text, text_color="white" if danger else theme.WARNING_TEXT)
+            self.banner_btn.configure(text=btn, text_color="#9e2f23" if danger else "#7a4b00")
+            self.banner.configure(fg_color=color)
         if not self.banner.winfo_ismapped():
             self.banner.grid(row=1, column=0, columnspan=2, sticky="ew")
-            self.clock_card.configure(border_width=3, border_color=theme.DANGER)
+        self.clock_card.configure(border_width=3 if danger else 0, border_color=theme.DANGER)
 
     def _banner_action(self):
-        if not self.app.cfg.get("auto_ring", True):
+        kind = getattr(self, "_banner_kind", "")
+        if kind == "sound":
+            self.open_library()
+            return
+        if kind == "auto":
             self.app.update_config(auto_ring=True)
         else:
             self.app.update_config(skip_date=None)
@@ -493,6 +512,14 @@ class MainWindow(ctk.CTk):
 
     def open_level_dialog(self):
         LevelDialog(self, self.app.cfg.get("level"), on_select=lambda lv: self.app.update_config(level=lv))
+
+    def open_library(self):
+        from .library_window import LibraryWindow
+        if self._library is not None and self._library.winfo_exists():
+            self._library.lift()
+            self._library.focus_force()
+            return
+        self._library = LibraryWindow(self, self.app)
 
     def open_settings(self):
         from .settings_window import SettingsWindow

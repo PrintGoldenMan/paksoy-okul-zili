@@ -34,9 +34,6 @@ def config_file() -> Path:
     return data_dir() / "ayarlar.json"
 
 
-def builtin_sound_dir() -> Path:
-    return sub_dir("hazir_sesler")
-
 
 def tts_cache_dir() -> Path:
     return sub_dir("anons_onbellek")

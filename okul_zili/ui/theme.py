@@ -16,6 +16,8 @@ DANGER_HOVER = ("#9e2f23", "#b8443f")
 SUCCESS = ("#1e8449", "#1e8449")
 SUCCESS_HOVER = ("#176b3a", "#176b3a")
 WARNING_BG = ("#fdecea", "#4a1f1c")
+WARNING = ("#fbbf24", "#f59e0b")          # sarı uyarı şeridi (ör. zil sesi seçilmedi)
+WARNING_TEXT = ("#3b2600", "#2a1b00")
 DONE_CHIP = ("#e1e5ea", "#353b43")      # çalmış/kapalı zil etiketi
 DONE_CHIP_TEXT = ("#4b5563", "#a3adba")
 
