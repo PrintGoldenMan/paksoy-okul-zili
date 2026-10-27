@@ -50,7 +50,7 @@ jobs:
           pyinstaller --noconfirm --clean --windowed --name OkulZili
           --icon assets/okul_zili.ico --add-data "assets;assets"
           --collect-data customtkinter --collect-all edge_tts
-          --collect-all yt_dlp --collect-all yt_dlp_ejs --collect-all imageio_ffmpeg
+          --collect-all yt_dlp --collect-all yt_dlp_ejs --collect-all imageio_ffmpeg --copy-metadata yt-dlp
           --collect-submodules pyttsx3 --collect-submodules comtypes
           --hidden-import comtypes.stream --hidden-import win32com.client --hidden-import pythoncom
           main.py
@@ -60,7 +60,7 @@ jobs:
           pyinstaller --noconfirm --onefile --windowed --name OkulZili-Tasinabilir-${{ steps.ver.outputs.version }}
           --icon assets/okul_zili.ico --add-data "assets;assets"
           --collect-data customtkinter --collect-all edge_tts
-          --collect-all yt_dlp --collect-all yt_dlp_ejs --collect-all imageio_ffmpeg
+          --collect-all yt_dlp --collect-all yt_dlp_ejs --collect-all imageio_ffmpeg --copy-metadata yt-dlp
           --collect-submodules pyttsx3 --collect-submodules comtypes
           --hidden-import comtypes.stream --hidden-import win32com.client --hidden-import pythoncom
           main.py

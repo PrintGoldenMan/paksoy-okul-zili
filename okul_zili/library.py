@@ -6,7 +6,9 @@ kutuphane.json dosyasında tutulur. Zil ayarlarında bir ses "lib:<kimlik>" olar
 
 import json
 import logging
+import os
 import re
+import shutil
 import threading
 import time
 import unicodedata
@@ -59,24 +61,81 @@ class Library:
     def __init__(self):
         self._lock = threading.RLock()
         self._index = library_dir() / "kutuphane.json"
+        self._items = []
         self._items = self._load()
 
+    @staticmethod
+    def _read(path: Path) -> list:
+        with open(path, encoding="utf-8-sig") as f:
+            data = json.load(f)
+        return [i for i in data.get("items", []) if isinstance(i, dict) and i.get("id") and i.get("file")]
+
     def _load(self) -> list:
-        try:
-            with open(self._index, encoding="utf-8-sig") as f:
-                data = json.load(f)
-            items = [i for i in data.get("items", []) if isinstance(i, dict) and i.get("id") and i.get("file")]
-            return items
-        except FileNotFoundError:
-            return []
-        except (OSError, ValueError, AttributeError) as exc:
-            log.error("Kütüphane listesi okunamadı: %s", exc)
-            return []
+        if not self._index.exists() and not self._index.with_suffix(".bak").exists():
+            items = []
+        else:
+            items = None
+            for path in (self._index, self._index.with_suffix(".bak")):
+                try:
+                    items = self._read(path)
+                    if path != self._index:
+                        log.warning("Kütüphane listesi yedekten okundu")
+                    break
+                except (OSError, ValueError, AttributeError) as exc:
+                    log.error("Kütüphane listesi okunamadı (%s): %s", path.name, exc)
+            if items is None:
+                # Liste bozuk ve yedek de yok: sesler klasördeki dosyalardan yeniden tanınır, böylece
+                # zillerin seçtiği sesler (kimlik dosya adında saklı) kaybolmaz.
+                try:
+                    self._index.replace(self._index.with_suffix(".bozuk.json"))
+                except OSError:
+                    pass
+                items = self._rebuild_from_files()
+        self._items = items
+        self._sweep_orphans()
+        return items
+
+    def _rebuild_from_files(self) -> list:
+        items = []
+        for f in sorted(library_dir().glob("*.opus")):
+            if f.name.endswith(".part.opus"):
+                continue
+            m = re.match(r"^(.*)-([0-9a-f]{6})$", f.stem)
+            # Dosya adında kimliğin yalnızca ilk 6 hanesi var; zil ayarlarındaki kimlikle eşleştirmek için
+            # o 6 haneyle başlayan tam kimlik kullanılamayacağından kısa kimlik kullanılır.
+            item_id = m.group(2) if m else uuid.uuid4().hex[:12]
+            title = (m.group(1) if m else f.stem).replace("-", " ").strip() or "Adsız ses"
+            items.append({"id": item_id, "file": f.name, "title": short_title(title), "full_title": title,
+                          "duration": None, "source": "Kurtarıldı", "added": time.strftime("%Y-%m-%d %H:%M")})
+        log.warning("Kütüphane listesi dosyalardan yeniden oluşturuldu (%d ses)", len(items))
+        return items
+
+    def _sweep_orphans(self):
+        """Listede olmayan ses dosyalarını ve yarım kalmış dönüştürmeleri temizler
+        (ör. çalarken silinen ve Windows'un o an silmeye izin vermediği dosyalar)."""
+        known = {i["file"] for i in self._items}
+        now = time.time()
+        for f in library_dir().iterdir():
+            if f.suffix != ".opus" or f.name in known:
+                continue
+            try:
+                if now - f.stat().st_mtime > 600:   # yeni başlamış bir indirmenin dosyasına dokunma
+                    f.unlink()
+                    log.info("Artık ses dosyası silindi: %s", f.name)
+            except OSError:
+                pass
 
     def _save(self):
         tmp = self._index.with_suffix(".tmp")
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump({"version": 1, "items": self._items}, f, ensure_ascii=False, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        if self._index.exists():
+            try:
+                shutil.copyfile(self._index, self._index.with_suffix(".bak"))
+            except OSError:
+                pass
         tmp.replace(self._index)
 
     # -- okuma ---------------------------------------------------------------
@@ -87,7 +146,11 @@ class Library:
 
     def get(self, item_id: str):
         with self._lock:
-            return next((dict(i) for i in self._items if i["id"] == item_id), None)
+            item = next((i for i in self._items if i["id"] == item_id), None)
+            if item is None:
+                # Liste dosyalardan yeniden oluşturulduysa kimlikler 6 hanelidir (dosya adındaki kısım).
+                item = next((i for i in self._items if len(i["id"]) == 6 and item_id.startswith(i["id"])), None)
+            return dict(item) if item else None
 
     def path(self, item_id: str):
         item = self.get(item_id)
@@ -97,7 +160,13 @@ class Library:
         return p if p.exists() else None
 
     def total_bytes(self) -> int:
-        return sum((library_dir() / i["file"]).stat().st_size for i in self.items())
+        total = 0
+        for i in self.items():
+            try:
+                total += (library_dir() / i["file"]).stat().st_size
+            except OSError:
+                pass
+        return total
 
     # -- yazma ---------------------------------------------------------------
 
@@ -130,11 +199,21 @@ class Library:
                 return
             self._items.remove(item)
             self._save()
-        try:
-            (library_dir() / item["file"]).unlink()
-        except OSError:
-            pass
+        path = library_dir() / item["file"]
         log.info("Kütüphaneden silindi: %s", item["title"])
+
+        def delete_file():
+            # Ses o an çalıyorsa Windows dosyayı kilitler; birkaç kez denenir, olmazsa açılışta temizlenir.
+            for _ in range(20):
+                try:
+                    path.unlink(missing_ok=True)
+                    return
+                except OSError:
+                    time.sleep(0.5)
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            threading.Thread(target=delete_file, daemon=True).start()
 
 
 _library = None

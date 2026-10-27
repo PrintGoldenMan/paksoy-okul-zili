@@ -105,6 +105,16 @@ class App:
         if self.window is not None:
             self.window.refresh_all()
 
+    def restart(self):
+        """Programı kapatıp yeniden açar (yt-dlp ya da program güncellemesinden sonra)."""
+        import subprocess
+        log.info("Program yeniden başlatılıyor")
+        self.player.stop()
+        flags = {"creationflags": 0x00000008 | 0x00000200} if os.name == "nt" else {"start_new_session": True}
+        subprocess.Popen(launch_args("--oz-restart"), close_fds=True, **flags)
+        _release_instance()
+        os._exit(0)
+
     def ring_now(self, kind):
         b = self.cfg["bells"][kind]
         log.info("Elle çalındı: %s", BELL_NAMES[kind])
@@ -144,6 +154,46 @@ def _already_running() -> bool:
         return False
     except OSError:
         return True
+
+
+def _release_instance():
+    global _instance_handle
+    if _instance_handle is None:
+        return
+    try:
+        if os.name == "nt":
+            import ctypes
+            ctypes.WinDLL("kernel32").CloseHandle(_instance_handle)
+        else:
+            _instance_handle.close()
+    except Exception:  # noqa: BLE001
+        pass
+    _instance_handle = None
+
+
+def _acquire_instance(wait_seconds=0.0) -> bool:
+    """Tek kopya kilidini alır. Yeniden başlatmada eski kopyanın kapanması wait_seconds kadar beklenir."""
+    import time
+    deadline = time.monotonic() + wait_seconds
+    while True:
+        if not _already_running():
+            return True
+        _release_instance()
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.5)
+
+
+def launch_args(*extra) -> list:
+    """Programı yeniden başlatmak için komut satırı (paketlenmiş ya da kaynak koddan)."""
+    if getattr(sys, "frozen", False):
+        return [sys.executable, *extra]
+    main_py = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "main.py")
+    exe = sys.executable
+    if os.name == "nt":
+        pythonw = os.path.join(os.path.dirname(exe), "pythonw.exe")
+        exe = pythonw if os.path.exists(pythonw) else exe
+    return [exe, main_py, *extra]
 
 
 def _show_already_running():
@@ -197,7 +247,7 @@ def main():
     if len(sys.argv) >= 3 and sys.argv[1] == "--oz-selftest":
         sys.exit(self_test(sys.argv[2]))
     _setup_logging()
-    if _already_running():
+    if not _acquire_instance(wait_seconds=20 if "--oz-restart" in sys.argv else 0):
         log.info("Program zaten açık; ikinci kopya kapatıldı")
         _show_already_running()
         return

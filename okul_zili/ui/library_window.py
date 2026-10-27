@@ -204,6 +204,14 @@ class LibraryWindow(ctk.CTkToplevel):
     def _assign(self, bell_name, sound_id):
         kind = next(k for k in BELL_TYPES if BELL_NAMES[k] == bell_name)
         bells = self.app.cfg["bells"]
+        if rotation.is_active(bells[kind]):
+            if not messagebox.askyesno(
+                    "Değişen ses açık", f"{bell_name} için «değişen ses» açık; şu an kütüphanedeki birkaç ses "
+                                        f"arasından sırayla seçiliyor.\n\nDeğişen ses kapatılıp {bell_name} her zaman "
+                                        f"«{sounds.display_name(sound_id)}» sesini mi çalsın?", parent=self):
+                self.refresh()
+                return
+            bells[kind]["rotation"]["enabled"] = False
         bells[kind]["sound"] = sound_id
         self.app.update_config(bells=bells)
         if self.app.window is not None:
@@ -297,11 +305,19 @@ class LibraryWindow(ctk.CTkToplevel):
     def _poll(self):
         try:
             while True:
-                self._jobs.get_nowait()()
-        except queue.Empty:
-            pass
-        if self.winfo_exists():
-            self.after(100, self._poll)
+                try:
+                    job = self._jobs.get_nowait()
+                except queue.Empty:
+                    break
+                try:
+                    job()
+                except Exception:  # noqa: BLE001 - tek bir hata pencereyi kilitlemesin
+                    log.exception("Kütüphane penceresi güncellenemedi")
+                    if self._busy and self.winfo_exists():
+                        self._set_busy(False)
+        finally:
+            if self.winfo_exists():
+                self.after(100, self._poll)
 
     def _run(self, work, done):
         """work() arka planda çalışır; sonucu ya da hatayı done(result, error) ile arayüze döner."""
@@ -317,7 +333,8 @@ class LibraryWindow(ctk.CTkToplevel):
             except Exception as exc:  # noqa: BLE001
                 log.exception("Kütüphane işlemi başarısız")
                 result, error = None, f"Beklenmeyen bir hata oluştu: {exc}"
-            self._jobs.put(lambda: done(result, error))
+            # Pencere bu arada kapatıldıysa sonuç arayüze yazılmaz.
+            self._jobs.put(lambda: self.winfo_exists() and done(result, error))
         downloader.run_in_thread(target)
 
     def _request_cancel(self):
@@ -359,10 +376,14 @@ class LibraryWindow(ctk.CTkToplevel):
                               "bir oynatma listesi. Listeyi indirmek için «Yalnızca bir bölümünü indir» işaretini "
                               "kaldırın ya da şarkının kendi bağlantısını yapıştırın.", theme.DANGER)
             return
+        if not self.winfo_exists():
+            return
         if probe.is_playlist:
             self.progress.set(0)
             self._show_status("Bu bağlantı bir oynatma listesi – onayınız bekleniyor…")
             if not self._confirm_playlist(probe):
+                if not self.winfo_exists():
+                    return
                 self._set_busy(False)
                 self._show_status("Oynatma listesi indirilmedi.", theme.MUTED)
                 return
@@ -391,14 +412,21 @@ class LibraryWindow(ctk.CTkToplevel):
     def _confirm_playlist(self, probe) -> bool:
         n = len(probe.entries)
         extra = ""
-        if probe.total_count > n:
-            extra = f"\n\nListede {probe.total_count} ses var; en fazla ilk {n} tanesi indirilir."
+        skipped = probe.skipped_long + probe.skipped_other
+        if probe.total_count > n + skipped:
+            extra += f"\n\nListede {probe.total_count} öğe var; en fazla {n} ses indirilir."
+        if probe.skipped_long:
+            extra += f"\n{probe.skipped_long} ses 15 dakikadan uzun olduğu için atlanacak."
+        if probe.skipped_other:
+            extra += f"\n{probe.skipped_other} öğe (iç içe liste ya da canlı yayın) atlanacak."
         first = ask_safely(
             self, "Oynatma listesi", "Bu bağlantı bir OYNATMA LİSTESİ",
             f"«{library.short_title(probe.title)}» listesindeki {n} sesin TAMAMI tek tek indirilecek.{extra}\n\n"
             "Yalnızca tek bir şarkı istiyorsanız «Vazgeç»e basın ve o şarkının kendi bağlantısını yapıştırın.",
             accept_text="Listeyi indir", accept_side="left")
         if not first:
+            return False
+        if not self.winfo_exists():
             return False
         return ask_safely(
             self, "Oynatma listesi – ikinci onay", "Emin misiniz?",
@@ -472,6 +500,15 @@ class LibraryWindow(ctk.CTkToplevel):
                           command=lambda k=k: self._assign(BELL_NAMES[k], sid)).pack(side="left", padx=3)
         self.assign_bar.grid(row=4, column=0, sticky="w", pady=(8, 0))
 
+    def _offer_restart(self):
+        for w in self.assign_bar.winfo_children():
+            w.destroy()
+        ctk.CTkButton(self.assign_bar, text="⟳  Programı yeniden başlat", width=220,
+                      command=self.app.restart).pack(side="left")
+        ctk.CTkLabel(self.assign_bar, text="(birkaç saniye sürer; ziller etkilenmez)",
+                     text_color=theme.MUTED).pack(side="left", padx=8)
+        self.assign_bar.grid(row=4, column=0, sticky="w", pady=(8, 0))
+
     def _finish_error(self, error):
         self._set_busy(False)
         if error == "iptal":
@@ -506,15 +543,19 @@ class LibraryWindow(ctk.CTkToplevel):
         if self._busy:
             return
         self._set_busy(True)
+        self.cancel_btn.grid_remove()   # güncelleme iptal edilemez; yanıltıcı düğme gösterilmez
         self._show_status("yt-dlp'nin en son sürümü indiriliyor…")
 
         def done(version, error):
             self._set_busy(False)
             if error:
                 self._show_status(error, theme.DANGER)
+            elif "zaten güncel" in version:
+                self._show_status(f"✓ yt-dlp zaten güncel ({version.split()[0]}).", theme.SUCCESS)
             else:
-                self._show_status(f"✓ yt-dlp {version} indirildi. Programı kapatıp yeniden açtığınızda kullanılacak.",
+                self._show_status(f"✓ yt-dlp {version} indirildi. Kullanılması için program yeniden başlatılmalı.",
                                   theme.SUCCESS)
+                self._offer_restart()
         self._run(lambda cancel: downloader.update_ytdlp(lambda f, t: self._progress(f, t)), done)
 
     def _close(self):

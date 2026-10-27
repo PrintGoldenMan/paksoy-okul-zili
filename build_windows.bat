@@ -13,7 +13,7 @@ if errorlevel 1 goto :hata
     --icon assets\okul_zili.ico --add-data "assets;assets" ^
     --collect-data customtkinter ^
     --collect-all edge_tts ^
-    --collect-all yt_dlp --collect-all yt_dlp_ejs --collect-all imageio_ffmpeg ^
+    --collect-all yt_dlp --collect-all yt_dlp_ejs --collect-all imageio_ffmpeg --copy-metadata yt-dlp ^
     --collect-submodules pyttsx3 ^
     --collect-submodules comtypes ^
     --hidden-import comtypes.stream ^

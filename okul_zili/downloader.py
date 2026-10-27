@@ -80,11 +80,56 @@ def _updated_zip() -> Path:
     return tools_dir() / "yt-dlp.zip"
 
 
+def _pending_zip() -> Path:
+    """«Güncelle» ile indirilen sürüm; bir sonraki açılışta yt-dlp.zip'in yerine geçer.
+    (Çalışan programın kullandığı zip dosyası değiştirilmez, yoksa yarım kalan içe aktarmalar bozulur.)"""
+    return tools_dir() / "yt-dlp-yeni.zip"
+
+
+# «Güncelle»den sonra program yeniden başlatılana kadar indirme yapılmaz.
+RESTART_REQUIRED = False
+
+
+def _version_tuple(v: str):
+    return tuple(int(x) for x in re.findall(r"\d+", v or "")) or (0,)
+
+
+def bundled_ytdlp_version():
+    """Programla birlikte gelen yt-dlp sürümü (bilinmiyorsa None)."""
+    try:
+        from importlib import metadata
+        return metadata.version("yt-dlp")
+    except Exception:  # noqa: BLE001 - paketlenmiş programda paket bilgisi olmayabilir
+        pass
+    try:
+        from . import _build_info
+        return _build_info.YTDLP_VERSION
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def _install_finder():
-    z = _updated_zip()
-    if z.exists() and "yt_dlp" not in sys.modules and _valid_ytdlp_zip(z):
-        sys.meta_path.insert(0, _UpdatedYtDlpFinder(z))
-        log.info("Güncellenmiş yt-dlp kullanılıyor: %s", _zip_version(z))
+    if "yt_dlp" in sys.modules:
+        return
+    pending, z = _pending_zip(), _updated_zip()
+    if pending.exists():
+        if _valid_ytdlp_zip(pending):
+            pending.replace(z)
+        else:
+            pending.unlink(missing_ok=True)
+    if not z.exists():
+        return
+    if not _valid_ytdlp_zip(z):
+        z.unlink(missing_ok=True)
+        return
+    bundled = bundled_ytdlp_version()
+    if bundled and _version_tuple(_zip_version(z)) <= _version_tuple(bundled):
+        # Program güncellenmiş ve daha yeni bir yt-dlp ile gelmiş: eski indirilmiş sürüm silinir.
+        log.info("İndirilmiş yt-dlp (%s) programdakinden (%s) eski; kaldırıldı", _zip_version(z), bundled)
+        z.unlink(missing_ok=True)
+        return
+    sys.meta_path.insert(0, _UpdatedYtDlpFinder(z))
+    log.info("Güncellenmiş yt-dlp kullanılıyor: %s", _zip_version(z))
 
 
 def _valid_ytdlp_zip(z: Path) -> bool:
@@ -118,17 +163,28 @@ def ytdlp_version() -> str:
 
 
 def update_ytdlp(progress=None) -> str:
-    """yt-dlp'nin en son sürümünü indirir. Etkin olması için program yeniden başlatılmalıdır."""
+    """yt-dlp'nin en son sürümünü indirir. Program yeniden başlatılınca kullanılır."""
+    global RESTART_REQUIRED
     data = _fetch(YTDLP_UPDATE_URL, progress)
     tmp = tools_dir() / "yt-dlp.zip.part"
     tmp.write_bytes(data)
     if not _valid_ytdlp_zip(tmp):
         tmp.unlink(missing_ok=True)
         raise DownloadError("İndirilen yt-dlp dosyası geçersiz. Daha sonra tekrar deneyin.")
-    tmp.replace(_updated_zip())
-    version = _zip_version(_updated_zip())
-    log.info("yt-dlp güncellendi: %s", version)
+    version = _zip_version(tmp)
+    if _version_tuple(version) <= _version_tuple(ytdlp_version()):
+        tmp.unlink(missing_ok=True)
+        return version + " (zaten güncel)"
+    tmp.replace(_pending_zip())
+    RESTART_REQUIRED = True
+    log.info("yt-dlp güncellemesi indirildi: %s (yeniden başlatınca etkin)", version)
     return version
+
+
+def _check_restart():
+    if RESTART_REQUIRED:
+        raise DownloadError("yt-dlp güncellendi. İndirmeye devam etmek için programı yeniden başlatın "
+                            "(Kütüphane penceresindeki «Programı yeniden başlat» düğmesi).")
 
 
 # -- ffmpeg ve JavaScript çalıştırıcısı -----------------------------------------------------------
@@ -218,6 +274,8 @@ class Probe:
     duration: float = None           # tek ses için
     entries: list = field(default_factory=list)   # liste için [(bağlantı, başlık, süre)]
     total_count: int = 0             # listedeki toplam ses sayısı (sınırdan önce)
+    skipped_long: int = 0            # 15 dakikadan uzun olduğu için atlananlar
+    skipped_other: int = 0           # iç içe liste / canlı yayın olduğu için atlananlar
 
 
 class _QuietLogger:
@@ -275,6 +333,7 @@ def probe(url: str, cancel=None) -> Probe:
     url = url.strip()
     if not re.match(r"^https?://", url, re.I):
         raise DownloadError("Lütfen «https://» ile başlayan tam bir bağlantı yapıştırın.")
+    _check_restart()
     import yt_dlp
     opts = dict(_base_opts(), skip_download=True, extract_flat="in_playlist")
     try:
@@ -286,18 +345,37 @@ def probe(url: str, cancel=None) -> Probe:
         raise Cancelled()
     if info.get("_type") in ("playlist", "multi_video"):
         entries = []
-        total = 0
+        total = skipped_long = skipped_nested = 0
         for e in info.get("entries") or []:
             if not e:
                 continue
             total += 1
+            entry_url = e.get("url") or e.get("webpage_url") or e.get("id")
+            # Kanal bağlantılarında öğeler de birer listedir («Videolar», «Shorts» sekmeleri): atlanır.
+            if e.get("_type") == "playlist" or e.get("ie_key") == "YoutubeTab" or \
+                    re.search(r"[?&]list=|/playlist\b|/@[^/]+/?$|/(videos|shorts|streams)/?$", str(entry_url)):
+                skipped_nested += 1
+                continue
+            if e.get("live_status") in ("is_live", "is_upcoming"):
+                skipped_nested += 1
+                continue
+            if e.get("duration") and e["duration"] > LONG_AUDIO_SECONDS:
+                skipped_long += 1
+                continue
             if len(entries) < MAX_PLAYLIST:
-                entries.append((e.get("url") or e.get("webpage_url") or e.get("id"), e.get("title") or "",
-                                e.get("duration")))
+                entries.append((entry_url, e.get("title") or "", e.get("duration")))
         if not entries:
+            if skipped_nested and not skipped_long:
+                raise DownloadError("Bu bir kanal bağlantısı ya da içinde başka listeler var. Kanalın «Videolar» "
+                                    "sekmesinin ya da tek bir oynatma listesinin bağlantısını yapıştırın.")
+            if skipped_long:
+                raise DownloadError("Bu listedeki seslerin hepsi 15 dakikadan uzun; zil için indirilmedi.")
             raise DownloadError("Bu listede indirilebilecek ses bulunamadı.")
         return Probe(url, True, info.get("title") or "Oynatma listesi", entries=entries,
-                     total_count=total or info.get("playlist_count") or len(entries))
+                     total_count=total or info.get("playlist_count") or len(entries),
+                     skipped_long=skipped_long, skipped_other=skipped_nested)
+    if info.get("is_live") or info.get("live_status") in ("is_live", "is_upcoming"):
+        raise DownloadError("Bu bir canlı yayın; canlı yayınlar kütüphaneye eklenemez.")
     return Probe(url, False, info.get("title") or "Adsız ses", duration=info.get("duration"))
 
 
@@ -366,6 +444,7 @@ def download(url: str, title_hint: str = "", progress=None, cancel=None, section
 
     section=(başlangıç, bitiş) verilirse yalnızca o bölüm kaydedilir. Site izin veriyorsa yt-dlp
     yalnızca o bölümü indirir (uzun videolarda çok daha hızlı); olmazsa tamamı indirilip kesilir."""
+    _check_restart()
     import yt_dlp
     if _is_youtube(url):
         ensure_js_runtime(progress, cancel)
@@ -414,12 +493,20 @@ def _download(yt_dlp, url, title_hint, progress, cancel, section, partial):
         title = info.get("title") or title_hint or "Adsız ses"
         cut = None
         if section:
-            title = f"{title} ({fmt_time(section[0])}–{fmt_time(section[1])})"
             # İndirilen dosya yalnızca bölümse kesmeye gerek yok; tamamıysa burada kesilir.
             got = _duration(Path(src))
             wanted = section[1] - section[0]
+            start, end = section
             if not partial or got is None or got > wanted + 3:
                 cut = section
+                if got is not None:
+                    if start >= got:
+                        raise DownloadError(f"Bu ses {fmt_time(got)} uzunluğunda; seçilen başlangıç "
+                                            f"({fmt_time(start)}) sesin dışında kalıyor.")
+                    end = min(end, got)
+            elif got is not None:
+                end = min(end, start + got)
+            title = f"{title} ({fmt_time(start)}–{fmt_time(end)})"
         if progress:
             progress(0.88, "Ses dönüştürülüyor…")
         return _convert_and_add(src, title, source=info.get("webpage_url") or url, cancel=cancel, cut=cut,
@@ -459,8 +546,13 @@ def _convert_and_add(src: str, title: str, source: str, cancel=None, cut=None, t
         tmp.unlink(missing_ok=True)
         detail = (err or b"").decode("utf-8", "replace").strip()[-300:]
         raise DownloadError(f"Ses dosyası dönüştürülemedi; dosya bozuk ya da desteklenmiyor olabilir.\n({detail})")
+    length = _duration(tmp)
+    if length is None or length < 0.5:
+        tmp.unlink(missing_ok=True)
+        raise DownloadError("Ortaya çıkan ses boş: seçilen bölüm sesin dışında kalıyor ya da ses tamamen sessiz. "
+                            "Başka bir bölüm ya da başka bir ses deneyin.")
     tmp.replace(target)
-    return lib.add(item_id, target, title, duration=_duration(target), source=source)
+    return lib.add(item_id, target, title, duration=length, source=source)
 
 
 def _duration(path: Path):

@@ -173,3 +173,43 @@ class SectionDownloadTests(unittest.TestCase):
                              capture_output=True, text=True).stderr
         rate = float(re.findall(r"Zero crossings rate: ([0-9.]+)", out)[0])
         self.assertGreater(rate, 0.03)
+
+
+class LibraryRecoveryTests(unittest.TestCase):
+    def setUp(self):
+        self._home = tempfile.mkdtemp()
+        self._old = os.environ.get("HOME"), os.environ.get("APPDATA")
+        os.environ["HOME"] = os.environ["APPDATA"] = self._home
+        library._library = None
+
+    def tearDown(self):
+        for key, value in zip(("HOME", "APPDATA"), self._old):
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+        library._library = None
+        shutil.rmtree(self._home, ignore_errors=True)
+
+    def _add(self, name):
+        lib = library.get_library()
+        item_id, target = lib.new_target(name)
+        target.write_bytes(b"x")
+        lib.add(item_id, target, name)
+        return library.PREFIX + item_id
+
+    def test_corrupt_index_uses_backup(self):
+        a = self._add("Bir")
+        b = self._add("İki")          # ikinci kayıtta ilk liste .bak olarak saklanır
+        (library.library_dir() / "kutuphane.json").write_text("", encoding="utf-8")
+        library._library = None
+        self.assertIsNotNone(sounds.resolve(a))
+        self.assertIsNone(sounds.resolve(b))   # yedek bir önceki hâli içerir
+
+    def test_corrupt_index_without_backup_is_rebuilt_from_files(self):
+        sid = self._add("İstiklal Marşı")
+        idx = library.library_dir() / "kutuphane.json"
+        idx.write_text("{bozuk", encoding="utf-8")
+        library._library = None
+        self.assertIsNotNone(sounds.resolve(sid))   # zil ayarındaki tam kimlik hâlâ çözülür
+        self.assertEqual(sounds.display_name(sid), "istiklal marsi")
