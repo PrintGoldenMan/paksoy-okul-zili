@@ -11,6 +11,7 @@ Düzey yalnızca neyin görüneceğini belirler; yapılmış ayarlar düzey değ
 
 import copy
 import datetime as dt
+import json
 import os
 import subprocess
 import sys
@@ -24,7 +25,7 @@ from ..config import (BELL_NAMES, BELL_TYPES, DEFAULT_RING_SECONDS, LEVEL_DESCRI
 from ..schedule import fmt_hm, parse_hm
 from ..turkish import DAYS, capitalize_first, ordinal_word
 from . import theme
-from .widgets import Card, Spin, labeled_row, time_entry
+from .widgets import Card, Spin, fit_to_screen, labeled_row, time_entry
 
 LEVEL_RANK = {lv: i for i, lv in enumerate(LEVELS)}
 SHORT_DAYS = ["Pzt", "Sal", "Çar", "Per", "Cum", "Cmt", "Paz"]
@@ -66,7 +67,7 @@ class SoundPicker(ctk.CTkFrame):
 
     def _show_length(self):
         n = sounds.length_seconds(self.sound_id)
-        text = f"(sesin kendi uzunluğu {n:.1f} sn)".replace(".", ",") if n else ""
+        text = f"(ses dosyası {n:.1f} sn)".replace(".", ",") if n else ""
         self.length_lbl.configure(text=text)
 
     def _on_select(self, name):
@@ -183,9 +184,9 @@ class SettingsWindow(ctk.CTkToplevel):
         self.app = app
         self.cfg = copy.deepcopy(app.cfg)
         self.level = self.cfg.get("level") or "basit"
-        self.title("Ayarlar")
-        self.geometry("1040x780")
-        self.minsize(860, 600)
+        self.title("Okul Zili – Ayarlar")
+        fit_to_screen(self, 1040, 800)
+        self.minsize(820, 520)
         self.configure(fg_color=theme.WINDOW_BG)
         self.transient(master)
         self._collectors = []
@@ -209,13 +210,14 @@ class SettingsWindow(ctk.CTkToplevel):
         bottom = ctk.CTkFrame(self, fg_color="transparent")
         bottom.pack(side="bottom", fill="x", padx=18, pady=12)
         ctk.CTkButton(bottom, text="Kaydet", width=140, height=40, font=theme.font(15, "bold"),
-                      fg_color=theme.SUCCESS, hover_color=("#176b3a", "#27ae60"),
+                      fg_color=theme.SUCCESS, hover_color=theme.SUCCESS_HOVER, text_color="white",
                       command=self._save).pack(side="right")
         ctk.CTkButton(bottom, text="Vazgeç", width=110, height=40, fg_color="transparent", border_width=1,
                       text_color=theme.TEXT, command=self._cancel).pack(side="right", padx=10)
         self.protocol("WM_DELETE_WINDOW", self._cancel)
 
         self._build_tabs()
+        self._baseline = self._snapshot()
         self.after(100, self.lift)
 
     # -- düzen --------------------------------------------------------------
@@ -260,14 +262,21 @@ class SettingsWindow(ctk.CTkToplevel):
         self._build_tabs(keep=self.tabs.get())
         return True
 
-    def _collect(self):
+    def _collect(self, show_errors=True):
         try:
             for fn in self._collectors:
                 fn()
         except ValueError as exc:
-            messagebox.showerror("Hatalı ayar", str(exc), parent=self)
+            if show_errors:
+                messagebox.showerror("Hatalı ayar", str(exc), parent=self)
             return False
         return True
+
+    def _snapshot(self):
+        """Ekrandaki ayarların karşılaştırma için kopyası (kaydedilmemiş değişiklik var mı?)."""
+        if not self._collect(show_errors=False):
+            return None
+        return json.dumps(self.cfg, sort_keys=True, ensure_ascii=False)
 
     def _on_level(self, name):
         new = next(k for k, v in LEVEL_NAMES.items() if v == name)
@@ -298,7 +307,7 @@ class SettingsWindow(ctk.CTkToplevel):
         lessons = schedule.lessons_for_weekday(self.cfg, 0) or [(parse_hm(t["first_lesson"]), 0)]
         first = lessons[0][0]
         b = self._card(f, "Sabah Zilleri", "İlk dersten önce çalan zilleri buradan kapatabilirsiniz. "
-                                           "Kapatılan zil her gün çalmaz.")
+                                           "Kapalı olan zil hiçbir gün çalmaz.")
         student = ctk.BooleanVar(value=t.get("morning_student_bell", True))
         teacher = ctk.BooleanVar(value=t.get("morning_teacher_bell", True))
         ctk.CTkSwitch(b, text=f"{fmt_hm(first - int(t['student_offset']))}  Öğrenci zili "
@@ -615,8 +624,28 @@ class SettingsWindow(ctk.CTkToplevel):
                 side="left", padx=6)
             rows.append(item)
 
+        empty = ctk.CTkLabel(holder, text="Henüz tatil eklenmedi.", text_color=theme.MUTED, anchor="w")
+
+        def refresh_empty():
+            if rows:
+                head.pack(fill="x", before=rows[0][0])
+                empty.pack_forget()
+            else:
+                head.pack_forget()
+                empty.pack(fill="x", pady=4)
+
+        _add = add
+
+        def add(*args, **kw):  # noqa: F811 - boş liste yazısını da günceller
+            _add(*args, **kw)
+            item = rows[-1]
+            item[0].winfo_children()[-1].configure(
+                command=lambda: (item[0].destroy(), rows.remove(item), refresh_empty()))
+            refresh_empty()
+
         for h in sorted(cfg["holidays"], key=lambda h: h.get("start", "")):
             add(h.get("name", ""), h.get("start", ""), h.get("end", ""))
+        refresh_empty()
 
         def add_official():
             today = dt.date.today()
@@ -825,7 +854,7 @@ class SettingsWindow(ctk.CTkToplevel):
             e = e or {"enabled": True, "time": "08:20", "days": [0], "label": "Yeni zil",
                       "sound": "builtin:gong", "text": "", "duration": DEFAULT_RING_SECONDS}
             card = ctk.CTkFrame(holder, fg_color=theme.CARD_BG, corner_radius=12)
-            card.grid(row=len(items), column=0, sticky="ew", pady=5, padx=4)
+            card.grid(row=len(items) + 1, column=0, sticky="ew", pady=5, padx=4)
             line1 = ctk.CTkFrame(card, fg_color="transparent")
             line1.pack(fill="x", padx=12, pady=(10, 4))
             en = ctk.BooleanVar(value=e.get("enabled", True))
@@ -855,28 +884,42 @@ class SettingsWindow(ctk.CTkToplevel):
             text.insert(0, e.get("text", ""))
             text.pack(side="left", padx=8)
             item = {"card": card, "en": en, "label": label, "time": tm, "days": day_vars, "picker": picker,
-                    "text": text, "duration": dur}
+                    "text": text, "duration": dur, "orig": dict(e)}
 
             def remove():
                 card.destroy()
                 items.remove(item)
+                refresh_empty()
             ctk.CTkButton(line2, text="Sil", width=60, fg_color=theme.DANGER, hover_color=theme.DANGER_HOVER,
                           command=remove).pack(side="right")
             items.append(item)
+            refresh_empty()
+
+        empty = ctk.CTkLabel(holder, text="Henüz ek zil yok. Aşağıdaki düğmelerle yeni zil ekleyebilir ya da "
+                                          "hazır örneklerden birini seçebilirsiniz.",
+                             text_color=theme.MUTED, anchor="w")
+
+        def refresh_empty():
+            if items:
+                empty.grid_remove()
+            else:
+                empty.grid(row=0, column=0, sticky="w", padx=8, pady=10)
 
         for e in cfg.get("extra_bells", []):
             add(e)
+        refresh_empty()
 
         btns = ctk.CTkFrame(f, fg_color="transparent")
         btns.grid(row=2, column=0, sticky="w", pady=8, padx=4)
         ctk.CTkButton(btns, text="+ Ek zil ekle", command=add).pack(side="left")
-        ctk.CTkButton(btns, text="Örnek: Pazartesi bayrak töreni", fg_color="transparent", border_width=1,
+        ctk.CTkLabel(btns, text="Hazır örnekler:", text_color=theme.MUTED).pack(side="left", padx=(16, 0))
+        ctk.CTkButton(btns, text="Pazartesi bayrak töreni", fg_color="transparent", border_width=1,
                       text_color=theme.TEXT, command=lambda: add({
                           "enabled": True, "time": "08:20", "days": [0], "label": "Bayrak Töreni",
                           "sound": "builtin:kampana",
                           "text": "Sevgili öğrenciler, bayrak töreni için okul bahçesinde toplanınız."})).pack(
             side="left", padx=8)
-        ctk.CTkButton(btns, text="Örnek: Cuma haftayı kapatma", fg_color="transparent", border_width=1,
+        ctk.CTkButton(btns, text="Cuma haftayı kapatma", fg_color="transparent", border_width=1,
                       text_color=theme.TEXT, command=lambda: add({
                           "enabled": True, "time": "15:25", "days": [4], "label": "Bayrak Töreni (Cuma)",
                           "sound": "builtin:kampana",
@@ -897,7 +940,7 @@ class SettingsWindow(ctk.CTkToplevel):
                     raise ValueError(f"Ek Ziller: «{name}» çalma süresi: {exc}")
                 if not days:
                     raise ValueError(f"Ek Ziller: «{name}» için en az bir gün seçin.")
-                out.append({"enabled": bool(it["en"].get()), "time": tm, "days": days, "label": name,
+                out.append({**it["orig"], "enabled": bool(it["en"].get()), "time": tm, "days": days, "label": name,
                             "sound": it["picker"].get(), "text": it["text"].get().strip(),
                             "duration": seconds})
             seen = set()
@@ -1120,10 +1163,13 @@ class SettingsWindow(ctk.CTkToplevel):
         b = self._card(f, "Yedekleme", "Ayarları bir dosyaya kaydedip başka bir bilgisayara aktarabilirsiniz.")
         row = ctk.CTkFrame(b, fg_color="transparent")
         row.grid(row=0, column=0, sticky="w")
-        ctk.CTkButton(row, text="Ayarları dışa aktar…", command=self._export).pack(side="left")
-        ctk.CTkButton(row, text="Ayarları içe aktar…", command=self._import).pack(side="left", padx=8)
-        ctk.CTkButton(row, text="Varsayılan ayarlara dön", fg_color=theme.DANGER, hover_color=theme.DANGER_HOVER,
-                      command=self._reset).pack(side="left", padx=8)
+        ctk.CTkButton(row, text="Ayarları yedekle…", command=self._export).pack(side="left")
+        ctk.CTkButton(row, text="Yedekten geri yükle…", command=self._import).pack(side="left", padx=8)
+
+        b = self._card(f, "Tehlikeli İşlem", "Bütün ayarlar (ders saatleri, sesler, tatiller, programlar) "
+                                             "silinir ve ilk kurulum değerlerine döner.")
+        ctk.CTkButton(b, text="Varsayılan ayarlara dön", fg_color=theme.DANGER, hover_color=theme.DANGER_HOVER,
+                      command=self._reset).grid(row=0, column=0, sticky="w")
 
         b = self._card(f, "Veri Klasörü")
         ctk.CTkLabel(b, text=str(paths.data_dir()), anchor="w").grid(row=0, column=0, sticky="w")
@@ -1198,9 +1244,16 @@ class SettingsWindow(ctk.CTkToplevel):
                 return
         self.cfg["level"] = self.level
         self.app.apply_config(self.cfg, keep_runtime=True)
+        self.app.player.stop_preview()
+        if self.app.window is not None:
+            self.app.window.flash("✓  Ayarlar kaydedildi")
         self.destroy()
 
     def _cancel(self):
+        if self._snapshot() != self._baseline and not messagebox.askyesno(
+                "Kaydedilmemiş değişiklikler", "Yaptığınız değişiklikler kaydedilmedi.\n\n"
+                                              "Kaydetmeden kapatılsın mı?", icon="warning", parent=self):
+            return
         self.app.player.stop_preview()
         self.destroy()
 

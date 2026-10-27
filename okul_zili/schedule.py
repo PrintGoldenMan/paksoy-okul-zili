@@ -222,6 +222,16 @@ def events_for_date(cfg: dict, date: dt.date) -> list:
     return events
 
 
+def next_school_day(cfg: dict, date: dt.date, limit_days=120):
+    """date'ten sonraki ilk zil çalacak gün ve o günün ilk zili: (tarih, BellEvent) veya None."""
+    for i in range(1, limit_days + 1):
+        d = date + dt.timedelta(days=i)
+        events = [e for e in events_for_date(cfg, d) if not e.off]
+        if events:
+            return d, events[0]
+    return None
+
+
 def current_status(cfg: dict, now: dt.datetime):
     """(başlık, ayrıntı, ilerleme 0..1 veya None) döndürür."""
     date = now.date()

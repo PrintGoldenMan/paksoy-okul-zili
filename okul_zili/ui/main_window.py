@@ -2,6 +2,7 @@
 
 import datetime as dt
 import logging
+import time
 
 import customtkinter as ctk
 from tkinter import messagebox
@@ -11,7 +12,7 @@ from ..config import BELL_NAMES, LEVEL_NAMES
 from ..turkish import long_date
 from . import theme
 from .level_dialog import LevelDialog
-from .widgets import Card
+from .widgets import Card, fit_to_screen
 
 log = logging.getLogger(__name__)
 
@@ -21,23 +22,27 @@ class MainWindow(ctk.CTk):
         super().__init__()
         self.app = app
         self.title(f"{APP_NAME} – {app.cfg['school_name']}")
-        self.geometry("1180x740")
-        self.minsize(980, 640)
+        fit_to_screen(self, 1200, 760)
+        self.minsize(900, 580)
         self.configure(fg_color=theme.WINDOW_BG)
         self.protocol("WM_DELETE_WINDOW", self._on_close)
         self._schedule_signature = None
         self._row_widgets = []
         self._settings = None
         self._row_toggles = False
+        self._flash_until = 0.0
+        self._flash_text = ""
 
-        self.grid_columnconfigure(0, weight=5, uniform="c")
-        self.grid_columnconfigure(1, weight=4, uniform="c")
-        self.grid_rowconfigure(1, weight=1)
+        self.grid_columnconfigure(0, weight=1, uniform="c")
+        self.grid_columnconfigure(1, weight=1, uniform="c")
+        self.grid_rowconfigure(2, weight=1)
 
         self._build_header()
+        self._build_banner()
         self._build_left()
         self._build_right()
         self._build_statusbar()
+        self._layout(compact=False)
         self.refresh_all()
         self._tick()
 
@@ -60,14 +65,109 @@ class MainWindow(ctk.CTk):
                       fg_color="#ffffff", text_color="#1f3b63", hover_color="#dfe7f2",
                       command=self.open_settings).grid(row=0, column=3, rowspan=2, padx=(6, 18))
 
+    # -- küçük ekran düzeni ----------------------------------------------------
+
+    def _check_size(self):
+        """Pencere yüksekliğine göre sıkışık düzene geçer (saat her saniye bunu çağırır)."""
+        try:
+            scale = ctk.ScalingTracker.get_window_scaling(self)
+        except Exception:  # noqa: BLE001
+            scale = 1.0
+        height = self.winfo_height()
+        if height <= 1:
+            return
+        compact = height / scale < 700
+        if compact != self._compact:
+            self._layout(compact)
+
+    def _layout(self, compact):
+        """Kısa ekranlarda (ör. 1366x768 ve %125 ölçek) daha sıkışık düzen kullanılır."""
+        self._compact = compact
+        self.clock_lbl.configure(font=ctk.CTkFont(size=54 if compact else 76, weight="bold"))
+        self.date_lbl.grid_configure(pady=(8 if compact else 16, 0))
+        self.progress.grid_configure(pady=(4, 10) if compact else (8, 18))
+        self.next_time.configure(font=theme.font(26 if compact else 34, "bold"))
+        self.next_left.configure(font=theme.font(20 if compact else 26, "bold"))
+        if compact:
+            self.next_note.grid_remove()
+        else:
+            self.next_note.grid()
+        short = {"ogrenci": "Öğrenci", "ogretmen": "Öğretmen", "cikis": "Çıkış"}
+        for kind, b in zip(config.BELL_TYPES, self.ring_btns):
+            b.configure(text=short[kind] if compact else BELL_NAMES[kind])
+        c = self._ctrl_body
+        for w in self.ring_btns + [self.announce_btn, self.stop_btn]:
+            w.grid_forget()
+        if compact:
+            # 2 sütun: Öğrenci | Öğretmen / Çıkış | Sustur
+            c.grid_columnconfigure((0, 1), weight=1, uniform="b")
+            self.ring_btns[0].grid(row=0, column=0, sticky="ew", padx=(0, 3), pady=3)
+            self.ring_btns[1].grid(row=0, column=1, sticky="ew", padx=(3, 0), pady=3)
+            self.ring_btns[2].grid(row=1, column=0, sticky="ew", padx=(0, 3), pady=3)
+            self.stop_btn.grid(row=1, column=1, sticky="ew", padx=(3, 0), pady=3)
+            self.announce_btn.grid(row=2, column=0, columnspan=2, sticky="ew", pady=3)
+        else:
+            c.grid_columnconfigure(1, weight=0, uniform="")
+            for i, b in enumerate(self.ring_btns):
+                b.grid(row=i, column=0, columnspan=2, sticky="ew", pady=3)
+            self.announce_btn.grid(row=3, column=0, columnspan=2, sticky="ew", pady=3)
+            self.stop_btn.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(10, 3))
+        self._apply_announce_visibility()
+
+    def _apply_announce_visibility(self):
+        cfg = self.app.cfg
+        level = cfg.get("level") or "basit"
+        if level in ("kolay", "basit") or not cfg["tts"].get("enabled"):
+            self.announce_btn.grid_remove()
+        else:
+            self.announce_btn.grid()
+
+    def _build_banner(self):
+        """Ziller kapalıyken ekranın üstünde görünen kırmızı uyarı şeridi."""
+        self.banner = ctk.CTkFrame(self, fg_color=theme.DANGER, corner_radius=0)
+        self.banner.grid_columnconfigure(0, weight=1)
+        self.banner_lbl = ctk.CTkLabel(self.banner, text="", text_color="white", font=theme.font(17, "bold"),
+                                       anchor="w")
+        self.banner_lbl.grid(row=0, column=0, sticky="ew", padx=20, pady=10)
+        self.banner_btn = ctk.CTkButton(self.banner, text="", width=170, height=34, font=theme.font(14, "bold"),
+                                        fg_color="white", text_color=("#9e2f23", "#9e2f23"), hover_color="#fbe3e0",
+                                        command=self._banner_action)
+        self.banner_btn.grid(row=0, column=1, padx=20)
+
+    def _update_banner(self, cfg, now):
+        if not cfg.get("auto_ring", True):
+            text, btn = "⚠  ZİLLER KAPALI – otomatik zil çalmayacak", "Zilleri aç"
+        elif cfg.get("skip_date") == now.date().isoformat():
+            text, btn = "⚠  BUGÜN ZİLLER KAPALI – yarın otomatik olarak açılır", "Bugün de çalsın"
+        else:
+            text = None
+        if text is None:
+            if self.banner.winfo_ismapped():
+                self.banner.grid_remove()
+                self.clock_card.configure(border_width=0)
+            return
+        if self.banner_lbl.cget("text") != text:
+            self.banner_lbl.configure(text=text)
+            self.banner_btn.configure(text=btn)
+        if not self.banner.winfo_ismapped():
+            self.banner.grid(row=1, column=0, columnspan=2, sticky="ew")
+            self.clock_card.configure(border_width=3, border_color=theme.DANGER)
+
+    def _banner_action(self):
+        if not self.app.cfg.get("auto_ring", True):
+            self.app.update_config(auto_ring=True)
+        else:
+            self.app.update_config(skip_date=None)
+        self.flash("✓  Ziller yeniden açıldı")
+
     def _build_left(self):
         left = ctk.CTkFrame(self, fg_color="transparent")
-        left.grid(row=1, column=0, sticky="nsew", padx=(18, 9), pady=16)
+        left.grid(row=2, column=0, sticky="nsew", padx=(18, 9), pady=16)
         left.grid_columnconfigure(0, weight=1)
         left.grid_rowconfigure(1, weight=1)
 
         # Saat ve durum
-        clock = ctk.CTkFrame(left, fg_color=theme.CARD_BG, corner_radius=16)
+        clock = self.clock_card = ctk.CTkFrame(left, fg_color=theme.CARD_BG, corner_radius=16)
         clock.grid(row=0, column=0, sticky="ew")
         clock.grid_columnconfigure(0, weight=1)
         self.date_lbl = ctk.CTkLabel(clock, text="", font=theme.font(16), text_color=theme.MUTED)
@@ -77,7 +177,7 @@ class MainWindow(ctk.CTk):
         self.status_lbl = ctk.CTkLabel(clock, text="", font=theme.font(20, "bold"), text_color=theme.ACCENT)
         self.status_lbl.grid(row=2, column=0)
         self.status_detail = ctk.CTkLabel(clock, text="", text_color=theme.MUTED)
-        self.status_detail.grid(row=3, column=0)
+        self.status_detail.grid(row=3, column=0, pady=(0, 10))
         self.progress = ctk.CTkProgressBar(clock, height=10, progress_color=theme.ACCENT)
         self.progress.grid(row=4, column=0, sticky="ew", padx=40, pady=(8, 18))
 
@@ -99,7 +199,7 @@ class MainWindow(ctk.CTk):
         self.next_time.grid(row=1, column=0)
         self.next_note = ctk.CTkLabel(b, text="", text_color=theme.MUTED, wraplength=230)
         self.next_note.grid(row=2, column=0)
-        self.next_left = ctk.CTkLabel(b, text="", font=theme.font(18, "bold"), text_color=theme.ACCENT)
+        self.next_left = ctk.CTkLabel(b, text="", font=theme.font(26, "bold"), text_color=theme.ACCENT)
         self.next_left.grid(row=3, column=0, pady=(6, 0))
 
         ctrl = Card(lower, "Elle Zil Çal")
@@ -107,17 +207,18 @@ class MainWindow(ctk.CTk):
         c = ctrl.body
         c.grid_columnconfigure(0, weight=1)
         c.grid_columnconfigure(9, weight=0)
-        for i, kind in enumerate(config.BELL_TYPES):
+        self.ring_btns = [
             ctk.CTkButton(c, text=BELL_NAMES[kind], height=38, font=theme.font(14, "bold"),
                           fg_color=theme.BELL_COLORS[kind], hover_color=theme.BELL_HOVER[kind],
-                          command=lambda k=kind: self.app.ring_now(k)).grid(row=i, column=0, sticky="ew", pady=3)
+                          command=lambda k=kind: self._ring_now(k))
+            for kind in config.BELL_TYPES]
         self.announce_btn = ctk.CTkButton(c, text="📢  Anons Yap", height=38, font=theme.font(14, "bold"),
                                           command=self.open_announce)
-        self.announce_btn.grid(row=3, column=0, sticky="ew", pady=3)
         self.stop_btn = ctk.CTkButton(c, text="■  Sustur", height=38, font=theme.font(14, "bold"),
                                       fg_color=theme.DANGER, hover_color=theme.DANGER_HOVER,
                                       command=self.app.player.stop)
-        self.stop_btn.grid(row=4, column=0, sticky="ew", pady=(10, 3))
+        self._ctrl_body = c
+        self._compact = None
 
         # Anahtarlar
         sw = ctk.CTkFrame(left, fg_color=theme.CARD_BG, corner_radius=16)
@@ -131,7 +232,7 @@ class MainWindow(ctk.CTk):
 
     def _build_right(self):
         card = Card(self, "Bugünkü Zil Çizelgesi")
-        card.grid(row=1, column=1, sticky="nsew", padx=(9, 18), pady=16)
+        card.grid(row=2, column=1, sticky="nsew", padx=(9, 18), pady=16)
         self.day_info = ctk.CTkLabel(card.body, text="", text_color=theme.MUTED, anchor="w")
         self.day_info.grid(row=0, column=0, columnspan=2, sticky="ew")
         legend = ctk.CTkFrame(card.body, fg_color="transparent")
@@ -148,7 +249,7 @@ class MainWindow(ctk.CTk):
 
     def _build_statusbar(self):
         self.statusbar = ctk.CTkLabel(self, text="", anchor="w", text_color=theme.MUTED, font=theme.font(12))
-        self.statusbar.grid(row=2, column=0, columnspan=2, sticky="ew", padx=20, pady=(0, 8))
+        self.statusbar.grid(row=3, column=0, columnspan=2, sticky="ew", padx=20, pady=(0, 8))
 
     # -- güncelleme ---------------------------------------------------------
 
@@ -156,14 +257,12 @@ class MainWindow(ctk.CTk):
         cfg = self.app.cfg
         ctk.set_appearance_mode({"light": "light", "dark": "dark"}.get(cfg["theme"], "system"))
         self.title(f"{APP_NAME} – {cfg['school_name']}")
-        self.school_lbl.configure(text=cfg["school_name"])
+        name = cfg["school_name"]
+        self.school_lbl.configure(text=name if len(name) <= 60 else name[:58] + "…")
         level = cfg.get("level") or "basit"
         self.level_btn.configure(text=f"Düzey: {LEVEL_NAMES[level]}")
         self._row_toggles = config.LEVELS.index(level) >= config.LEVELS.index("gelismis")
-        if level in ("kolay", "basit") or not cfg["tts"].get("enabled"):
-            self.announce_btn.grid_remove()
-        else:
-            self.announce_btn.grid()
+        self._apply_announce_visibility()
         self.auto_var.set(cfg.get("auto_ring", True))
         self.skip_var.set(cfg.get("skip_date") == dt.date.today().isoformat())
         self._schedule_signature = None
@@ -175,9 +274,16 @@ class MainWindow(ctk.CTk):
             w.destroy()
         self._row_widgets = []
         if not events:
-            lbl = ctk.CTkLabel(self.list_frame, text="Bugün çalacak zil yok.", text_color=theme.MUTED,
-                               font=theme.font(15))
-            lbl.grid(row=0, column=0, columnspan=3, pady=40)
+            today = dt.date.today()
+            holiday = schedule.holiday_name(self.app.cfg, today)
+            text = f"🎉  Bugün tatil: {holiday}" if holiday else "Bugün okul günü değil"
+            text += "\nZil çalmayacak."
+            nxt = schedule.next_school_day(self.app.cfg, today)
+            if nxt:
+                text += f"\n\nSonraki okul günü:\n{long_date(nxt[0])}, ilk zil {nxt[1].time_str}"
+            lbl = ctk.CTkLabel(self.list_frame, text=text, text_color=theme.MUTED, font=theme.font(16),
+                               justify="center")
+            lbl.grid(row=0, column=0, columnspan=4, pady=50, sticky="ew")
             self._row_widgets.append(lbl)
             return
         for i, e in enumerate(events):
@@ -192,13 +298,15 @@ class MainWindow(ctk.CTk):
             chip.grid(row=0, column=1, padx=4)
             note = ctk.CTkLabel(row, text=e.note, anchor="w", font=theme.font(12))
             note.grid(row=0, column=2, sticky="ew", padx=(8, 4))
+            toggle = None
             if self._row_toggles and e.off != "Kapalı":
                 # Yalnızca bugün için bu zili kapat / aç
-                ctk.CTkButton(row, text="Aç" if e.off else "Kapat", width=58, height=26,
-                              font=theme.font(11), fg_color="transparent", border_width=1,
-                              text_color=theme.TEXT, hover_color=theme.ROW_NEXT,
-                              command=lambda e=e: self._toggle_bell_today(e)).grid(row=0, column=3, padx=(4, 8))
-            row._parts = (t, chip, note, i)
+                toggle = ctk.CTkButton(row, text="Aç" if e.off else "Kapat", width=58, height=26,
+                                       font=theme.font(12), fg_color="transparent", border_width=1,
+                                       text_color=theme.TEXT, hover_color=theme.ROW_NEXT,
+                                       command=lambda e=e: self._toggle_bell_today(e))
+                toggle.grid(row=0, column=3, padx=(4, 8))
+            row._parts = (t, chip, note, i, toggle)
             row._event = e
             self._row_widgets.append(row)
 
@@ -213,9 +321,11 @@ class MainWindow(ctk.CTk):
         for row in self._row_widgets:
             if not hasattr(row, "_event"):
                 continue
-            t, chip, note, i = row._parts
+            t, chip, note, i, toggle = row._parts
             e = row._event
             done = sched.was_fired(e)
+            if toggle is not None and done:
+                toggle.grid_remove()   # çalmış zil için «Kapat» anlamsız
             is_next = next_event is not None and e.key == next_event.key
             row.configure(fg_color=theme.ROW_NEXT if is_next else (theme.ROW_ALT if i % 2 else "transparent"))
             color = theme.MUTED if done or e.off else theme.TEXT
@@ -226,7 +336,20 @@ class MainWindow(ctk.CTk):
                 text = ("✓ " if done else "") + e.note
             note.configure(text_color=color, text=text)
             grey = done or e.off
-            chip.configure(fg_color=("#b9c0c9", "#4a515a") if grey else theme.BELL_COLORS[e.kind])
+            chip.configure(fg_color=theme.DONE_CHIP if grey else theme.BELL_COLORS[e.kind],
+                           text_color=theme.DONE_CHIP_TEXT if grey else "white")
+        self._scroll_to(next_event)
+
+    def _scroll_to(self, event):
+        """Listeyi, sonraki zil üstte birkaç satır geçmişle görünecek şekilde kaydırır."""
+        rows = [r for r in self._row_widgets if hasattr(r, "_event")]
+        if not rows or event is None:
+            return
+        idx = next((i for i, r in enumerate(rows) if r._event.key == event.key), 0)
+        try:
+            self.list_frame._parent_canvas.yview_moveto(max(0.0, (idx - 2) / len(rows)))
+        except Exception:  # noqa: BLE001 - customtkinter iç yapısı değişirse kaydırma yapılmaz
+            pass
 
     def _tick(self, reschedule=True):
         now = dt.datetime.now()
@@ -239,6 +362,7 @@ class MainWindow(ctk.CTk):
             log.exception("Ana ekran güncellenemedi")
 
     def _update(self, now):
+        self._check_size()
         cfg = self.app.cfg
         self.clock_lbl.configure(text=now.strftime("%H:%M:%S"))
         self.date_lbl.configure(text=long_date(now.date()))
@@ -279,12 +403,13 @@ class MainWindow(ctk.CTk):
         nxt = self.app.scheduler.next_event(now)
         self._style_rows(nxt)
         if nxt is None:
-            self.next_chip.configure(text="Bugün başka zil yok", fg_color=("#9aa3ae", "#4a515a"))
+            self.next_chip.configure(text="Bugün başka zil yok", fg_color=theme.DONE_CHIP,
+                                     text_color=theme.DONE_CHIP_TEXT)
             self.next_time.configure(text="—")
             self.next_note.configure(text="")
             self.next_left.configure(text="")
         else:
-            self.next_chip.configure(text=nxt.label, fg_color=theme.BELL_COLORS[nxt.kind])
+            self.next_chip.configure(text=nxt.label, fg_color=theme.BELL_COLORS[nxt.kind], text_color="white")
             self.next_time.configure(text=nxt.time_str)
             self.next_note.configure(text=nxt.note)
             secs = max(0, nxt.minute * 60 - (now.hour * 3600 + now.minute * 60 + now.second))
@@ -293,9 +418,19 @@ class MainWindow(ctk.CTk):
             self.next_left.configure(text=(f"{h} sa {m:02d} dk kaldı" if h else f"{m:02d}:{s:02d} kaldı"))
 
         self._update_statusbar(cfg, now)
+        self._update_banner(cfg, now)
+
+    def flash(self, text, seconds=4):
+        """Durum çubuğunda kısa süreli bilgi gösterir (ör. «Ayarlar kaydedildi»)."""
+        self._flash_text = text
+        self._flash_until = time.monotonic() + seconds
+        self._update_statusbar(self.app.cfg, dt.datetime.now())
 
     def _update_statusbar(self, cfg, now):
-        if self.app.player.playing:
+        color = theme.MUTED
+        if time.monotonic() < self._flash_until:
+            text, color = self._flash_text, theme.SUCCESS
+        elif self.app.player.playing:
             text = f"🔊  Çalıyor: {self.app.now_playing}"
         elif not self.app.player.available:
             text = "⚠  Ses sistemi başlatılamadı. Hoparlör/ses kartını kontrol edip programı yeniden açın."
@@ -305,12 +440,24 @@ class MainWindow(ctk.CTk):
             text = "⚠  Ziller yalnızca bugün için kapalı. Yarın otomatik olarak açılır."
         else:
             text = f"✓  Program çalışıyor. Ziller otomatik çalacak.   ·   {APP_NAME} {__version__}"
+        if text.startswith("⚠"):
+            color = theme.DANGER
         if self.statusbar.cget("text") != text:
-            self.statusbar.configure(text=text)
+            self.statusbar.configure(text=text, text_color=color,
+                                     font=theme.font(13, "bold" if color != theme.MUTED else "normal"))
 
     # -- olaylar ------------------------------------------------------------
 
+    def _ring_now(self, kind):
+        if messagebox.askyesno("Zil çal", f"{BELL_NAMES[kind]} şimdi bütün okulda çalınsın mı?", parent=self):
+            self.app.ring_now(kind)
+
     def _toggle_auto(self):
+        if not self.auto_var.get() and not messagebox.askyesno(
+                "Zilleri kapat", "Otomatik ziller kapatılsın mı?\n\nYeniden açana kadar HİÇBİR zil çalmaz.",
+                icon="warning", parent=self):
+            self.auto_var.set(True)
+            return
         self.app.update_config(auto_ring=bool(self.auto_var.get()))
 
     def _toggle_bell_today(self, event):
@@ -324,6 +471,11 @@ class MainWindow(ctk.CTk):
         self.app.update_config(skip_today={"date": today, "ids": ids})
 
     def _toggle_skip(self):
+        if self.skip_var.get() and not messagebox.askyesno(
+                "Bugün zilleri kapat", "Bugün kalan bütün ziller kapatılsın mı?\n\nYarın ziller otomatik "
+                                       "olarak yeniden çalar.", icon="warning", parent=self):
+            self.skip_var.set(False)
+            return
         self.app.update_config(skip_date=dt.date.today().isoformat() if self.skip_var.get() else None)
 
     def open_level_dialog(self):

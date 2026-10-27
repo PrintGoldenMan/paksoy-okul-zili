@@ -22,8 +22,12 @@ Okul zillerini ders programına göre otomatik çalan, Türkçe arayüzlü masa�
   (her düzeyde, Ayarlar → Sabah Zilleri).
 - **Zilleri tek tek kapatma:** Ana ekrandaki «Kapat» düğmesiyle herhangi bir zil yalnızca bugün için
   susturulur (Gelişmiş ve üstü). Profesyonel düzeyde ziller kalıcı olarak, her gün ya da belirli bir gün için kapatılabilir.
-- Elle zil çalma, anlık anons, «Sustur» düğmesi, «yalnızca bugün zilleri kapat» anahtarı.
-- Açık ve koyu tema. Program kapatılmak istendiğinde uyarı verir.
+- Elle zil çalma (onay sorulur), anlık anons, «Sustur» düğmesi, «yalnızca bugün zilleri kapat» anahtarı.
+- **Güvenlik:** Ziller kapatıldığında ekranın üstünde kırmızı «ZİLLER KAPALI» uyarısı ve tek tıkla
+  açma düğmesi görünür. Zilleri kapatmak, elle zil çalmak ve programı kapatmak onay ister.
+  Program iki kez açılamaz (ziller iki kez çalmaz). Ses aygıtı sonradan bağlanırsa ses kendiliğinden düzelir;
+  bozuk bir ses dosyasında klasik zil çalar.
+- Açık ve koyu tema. Küçük ekranlarda ve Windows ölçeklendirmesinde (%125, %150) pencereler ekrana sığar.
 
 ## Ayar düzeyleri
 

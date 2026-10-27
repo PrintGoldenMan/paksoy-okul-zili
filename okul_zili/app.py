@@ -76,6 +76,8 @@ class App:
 
     def run(self):
         ctk.set_default_color_theme("blue")
+        from .ui import theme
+        theme.apply_overrides()
         ctk.set_appearance_mode({"light": "light", "dark": "dark"}.get(self.cfg["theme"], "system"))
         # Hazır sesleri arka planda hazırla (ilk açılışta birkaç saniye sürer).
         threading.Thread(target=sounds.ensure_all, name="ses-hazirlik", daemon=True).start()

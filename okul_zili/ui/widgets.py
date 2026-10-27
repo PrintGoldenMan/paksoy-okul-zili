@@ -84,3 +84,24 @@ class Spin(ctk.CTkFrame):
         if not self.minimum <= v <= self.maximum:
             raise ValueError(f"{self._fmt(self.minimum)} ile {self._fmt(self.maximum)} arasında olmalı")
         return v
+
+
+def fit_to_screen(win, width, height, margin_w=24, margin_h=90):
+    """Pencereyi ekrana sığacak şekilde boyutlandırıp ortalar.
+
+    customtkinter boyutları ekran ölçeklemesiyle (ör. %125, %150) çarptığı için ekran boyutu
+    ölçek oranına bölünerek hesaplanır. margin_h görev çubuğu ve başlık çubuğu içindir.
+    Döndürülen değer: (genişlik, yükseklik) – ölçeklenmemiş birimlerle.
+    """
+    try:
+        scale = ctk.ScalingTracker.get_window_scaling(win)
+    except Exception:  # noqa: BLE001
+        scale = 1.0
+    screen_w = win.winfo_screenwidth() / scale
+    screen_h = win.winfo_screenheight() / scale
+    w = int(min(width, screen_w - margin_w))
+    h = int(min(height, screen_h - margin_h))
+    x = int(max(0, (screen_w - w) / 2))
+    y = int(max(0, (screen_h - margin_h - h) / 2))
+    win.geometry(f"{w}x{h}+{x}+{y}")
+    return w, h
