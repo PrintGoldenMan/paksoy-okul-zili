@@ -14,9 +14,10 @@ class Card(ctk.CTkFrame):
         super().__init__(master, **kw)
         self.grid_columnconfigure(0, weight=1)
         row = 0
+        self.title_label = None
         if title:
-            ctk.CTkLabel(self, text=title, font=theme.font(16, "bold"), anchor="w").grid(
-                row=row, column=0, sticky="ew", padx=16, pady=(12, 0))
+            self.title_label = ctk.CTkLabel(self, text=title, font=theme.font(16, "bold"), anchor="w")
+            self.title_label.grid(row=row, column=0, sticky="ew", padx=16, pady=(12, 0))
             row += 1
         if subtitle:
             ctk.CTkLabel(self, text=subtitle, font=theme.font(12), text_color=theme.MUTED,

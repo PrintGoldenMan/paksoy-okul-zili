@@ -167,7 +167,7 @@ class SettingsWindow(ctk.CTkToplevel):
         self.cfg = copy.deepcopy(app.cfg)
         self.level = self.cfg.get("level") or "basit"
         self.title("Ayarlar")
-        self.geometry("960x760")
+        self.geometry("1040x780")
         self.minsize(860, 600)
         self.configure(fg_color=theme.WINDOW_BG)
         self.transient(master)
@@ -213,13 +213,20 @@ class SettingsWindow(ctk.CTkToplevel):
         self.level_desc.configure(text=f"{LEVEL_NAMES[self.level]}: {LEVEL_DESCRIPTIONS[self.level]}")
         self.tabs = ctk.CTkTabview(self, fg_color=theme.WINDOW_BG, segmented_button_selected_color=theme.ACCENT)
         self.tabs.pack(fill="both", expand=True, padx=12)
-        self.tabs._segmented_button.configure(font=theme.font(14, "bold"), height=34)
-        pages = [("Genel", self._tab_general), ("Ders Saatleri", self._tab_times), ("Zil Sesleri", self._tab_sounds)]
+        self.tabs._segmented_button.configure(font=theme.font(13, "bold"), height=34)
+        if self.level == "kolay":
+            pages = [("Temel Ayarlar", self._tab_easy)]
+        else:
+            pages = [("Genel", self._tab_general), ("Ders Saatleri", self._tab_times),
+                     ("Zil Sesleri", self._tab_sounds)]
         if self._at_least("gelismis"):
             pages += [("Günler ve Tatiller", self._tab_days), ("Sesli Anons", self._tab_tts)]
         if self._at_least("uzman"):
-            pages += [("Güne Özel Saatler", self._tab_overrides), ("Ek Ziller", self._tab_extra),
-                      ("Sistem", self._tab_system)]
+            pages += [("Güne Özel", self._tab_overrides), ("Ek Ziller", self._tab_extra)]
+        if self._at_least("profesyonel"):
+            pages += [("Zil Listesi", self._tab_bell_list), ("Programlar", self._tab_profiles)]
+        if self._at_least("uzman"):
+            pages += [("Sistem", self._tab_system)]
         for name, builder in pages:
             tab = self.tabs.add(name)
             frame = ctk.CTkScrollableFrame(tab, fg_color="transparent")
@@ -268,7 +275,56 @@ class SettingsWindow(ctk.CTkToplevel):
                  sticky="w", pady=(4, 0))
         return lbl
 
+    def _morning_card(self, f):
+        """İlk dersin sabah zillerini (ör. 08:28 öğrenci, 08:30 öğretmen) açıp kapatma."""
+        t = self.cfg["timing"]
+        lessons = schedule.lessons_for_weekday(self.cfg, 0) or [(parse_hm(t["first_lesson"]), 0)]
+        first = lessons[0][0]
+        b = self._card(f, "Sabah Zilleri", "İlk dersten önce çalan zilleri buradan kapatabilirsiniz. "
+                                           "Kapatılan zil her gün çalmaz.")
+        student = ctk.BooleanVar(value=t.get("morning_student_bell", True))
+        teacher = ctk.BooleanVar(value=t.get("morning_teacher_bell", True))
+        ctk.CTkSwitch(b, text=f"{fmt_hm(first - int(t['student_offset']))}  Öğrenci zili "
+                              "(sabah öğrenciler sınıfa girer)",
+                      variable=student, font=theme.font(14)).grid(row=0, column=0, columnspan=3, sticky="w", pady=4)
+        ctk.CTkSwitch(b, text=f"{fmt_hm(first)}  Öğretmen zili (1. ders başlar)",
+                      variable=teacher, font=theme.font(14)).grid(row=1, column=0, columnspan=3, sticky="w", pady=4)
+
+        def collect():
+            t["morning_student_bell"] = bool(student.get())
+            t["morning_teacher_bell"] = bool(teacher.get())
+        self._collectors.append(collect)
+
     # -- sekmeler -----------------------------------------------------------
+
+    def _tab_easy(self, f):
+        cfg = self.cfg
+        b = self._card(f, "Ses Düzeyi")
+        vol_lbl = ctk.CTkLabel(b, text=f"%{int(cfg['master_volume'])}", width=50)
+        vol = ctk.CTkSlider(b, from_=0, to=100, number_of_steps=20, width=360,
+                            command=lambda v: vol_lbl.configure(text=f"%{int(v)}"))
+        vol.set(cfg["master_volume"])
+        labeled_row(b, 0, "Zil ses düzeyi", vol)
+        vol_lbl.grid(row=0, column=2, padx=8)
+        ctk.CTkButton(b, text="▶ Sesi dene", width=110,
+                      command=lambda: self.app.player.preview_sound(cfg["bells"]["ogretmen"]["sound"])).grid(
+            row=0, column=3, padx=8)
+
+        self._morning_card(f)
+
+        b = self._card(f, "Başlangıç")
+        auto_var = ctk.BooleanVar(value=cfg.get("autostart", False))
+        cb = ctk.CTkCheckBox(b, text="Bilgisayar açılınca program otomatik başlasın (önerilir)", variable=auto_var)
+        cb.grid(row=0, column=0, columnspan=3, sticky="w", pady=4)
+        if not autostart.supported():
+            cb.configure(state="disabled", text=cb.cget("text") + " – yalnızca Windows'ta")
+
+        self._hint(f, "Ders saatlerini veya zil seslerini değiştirmek için yukarıdan «Basit» düzeyini seçin.")
+
+        def collect():
+            cfg["master_volume"] = int(vol.get())
+            cfg["autostart"] = bool(auto_var.get())
+        self._collectors.append(collect)
 
     def _tab_general(self, f):
         cfg = self.cfg
@@ -307,7 +363,7 @@ class SettingsWindow(ctk.CTkToplevel):
         manual_active = cfg.get("schedule_mode") == "manual"
         overrides_active = bool(cfg.get("day_overrides"))
 
-        if self.level == "basit" and (manual_active or overrides_active):
+        if not self._at_least("gelismis") and (manual_active or overrides_active):
             b = self._card(f, "⚠ Ders saatleri elle ayarlanmış")
             self._hint(b, "Ders saatleri Gelişmiş veya Uzman düzeyde tek tek girilmiş. Aşağıdaki süreler şu anda "
                           "kullanılmıyor. Süreleri kullanmak için aşağıdaki düğmeye basın.", row=0)
@@ -363,9 +419,8 @@ class SettingsWindow(ctk.CTkToplevel):
                                           "öğretmenlerden önce sınıfa girer.")
         offset = Spin(b, t["student_offset"], 0, 15, suffix="dakika önce")
         labeled_row(b, 0, "Öğrenci zili, dersten", offset, "0 = öğrenci zili çalmasın")
-        morning = ctk.BooleanVar(value=t.get("morning_student_bell", True))
-        ctk.CTkCheckBox(b, text="Sabah ilk dersten önce de öğrenci zili çalsın", variable=morning).grid(
-            row=1, column=0, columnspan=3, sticky="w", pady=4)
+
+        self._morning_card(f)
 
         def collect():
             if auto_widgets:
@@ -384,7 +439,6 @@ class SettingsWindow(ctk.CTkToplevel):
                 t["student_offset"] = offset.get()
             except ValueError as exc:
                 raise ValueError(f"Öğrenci zili: {exc}")
-            t["morning_student_bell"] = bool(morning.get())
         self._collectors.append(collect)
 
         # Önizleme
@@ -795,7 +849,206 @@ class SettingsWindow(ctk.CTkToplevel):
             cfg["extra_bells"] = out
         self._collectors.append(collect)
 
+    def _tab_bell_list(self, f):
+        """Profesyonel: günün her zilini tek tek açıp kapatma."""
+        cfg = self.cfg
+        state = {k: list(v) for k, v in cfg.get("disabled_bells", {}).items()}
+        self._hint(f, "İşareti kaldırılan zil çalmaz. «Her gün» seçiliyken kapatılan zil bütün günlerde kapalıdır; "
+                      "bir gün seçerek yalnızca o güne özel kapatabilirsiniz. Yalnızca bugün için kapatmak "
+                      "isterseniz ana ekrandaki «Kapat» düğmesini kullanın.", row=0)
+        choices = ["Her gün"] + DAYS
+        seg = ctk.CTkSegmentedButton(f, values=choices)
+        seg.grid(row=1, column=0, sticky="w", pady=8, padx=4)
+        card = Card(f, "Zil listesi")
+        card.grid(row=2, column=0, sticky="ew", padx=4, pady=6)
+        holder = card.body
+
+        def toggle(scope, bell_id, var):
+            ids = state.setdefault(scope, [])
+            if var.get() and bell_id in ids:
+                ids.remove(bell_id)
+            elif not var.get() and bell_id not in ids:
+                ids.append(bell_id)
+
+        def show(choice):
+            for w in holder.winfo_children():
+                w.destroy()
+            scope = "all" if choice == "Her gün" else str(DAYS.index(choice))
+            wd = 0 if scope == "all" else int(scope)
+            tmp = dict(cfg, disabled_bells={})
+            events = schedule.events_for_lessons(tmp, schedule.lessons_for_weekday(tmp, wd))
+            if scope != "all":
+                events += schedule.extra_events(tmp, wd)
+            events.sort(key=lambda e: e.minute)
+            if not events:
+                ctk.CTkLabel(holder, text="Bu gün için zil yok.", text_color=theme.MUTED).grid(row=0, column=0)
+            for r, e in enumerate(events):
+                morning_off = bool(e.off)   # Sabah Zilleri ayarından kapatılmış
+                every_day_off = morning_off or (scope != "all" and e.bell_id in state.get("all", []))
+                var = ctk.BooleanVar(value=not every_day_off and e.bell_id not in state.get(scope, []))
+                cb = ctk.CTkCheckBox(holder, text="", variable=var, width=28,
+                                     command=lambda e=e, v=var: toggle(scope, e.bell_id, v))
+                cb.grid(row=r, column=0, pady=2)
+                if every_day_off:
+                    cb.configure(state="disabled")
+                ctk.CTkLabel(holder, text=e.time_str, font=theme.font(14, "bold"), width=56).grid(row=r, column=1)
+                ctk.CTkLabel(holder, text=e.label, width=120, corner_radius=6, text_color="white",
+                             fg_color=theme.BELL_COLORS[e.kind], font=theme.font(12, "bold")).grid(
+                    row=r, column=2, padx=6)
+                if morning_off:
+                    note = e.note + "   (Ders Saatleri → Sabah Zilleri ayarından kapalı)"
+                else:
+                    note = e.note + ("   (her gün kapalı)" if every_day_off else "")
+                ctk.CTkLabel(holder, text=note, anchor="w").grid(row=r, column=3, sticky="w", padx=6)
+            if scope == "all":
+                ctk.CTkLabel(holder, text="Liste Pazartesi gününün ders saatlerine göre gösterilir; zil kimliği "
+                                          "ders numarasına bağlıdır (ör. «3. dersin çıkış zili»).",
+                             text_color=theme.MUTED, font=theme.font(12)).grid(
+                    row=len(events), column=0, columnspan=10, sticky="w", pady=(8, 0))
+            card.title_label.configure(text=f"{choice} – zil listesi")
+        seg.configure(command=show)
+        seg.set("Her gün")
+        show("Her gün")
+
+        def collect():
+            cfg["disabled_bells"] = {k: v for k, v in state.items() if v}
+        self._collectors.append(collect)
+
+    def _tab_profiles(self, f):
+        """Profesyonel: adlandırılmış zil programları ve tarihlere atanmaları."""
+        cfg = self.cfg
+        self._hint(f, "Zil programı; ders saatleri, süreler, güne özel saatler ve kapatılan zillerden oluşur. "
+                      "Örneğin «Kısaltılmış Ders» programını kaydedip belirli tarihlerde otomatik "
+                      "kullanılmasını sağlayabilirsiniz. O tarihlerin dışında normal ayarlar geçerlidir.", row=0)
+
+        def summary(p):
+            t = p["timing"]
+            if p.get("schedule_mode") == "manual":
+                text = f"{len(p.get('manual_lessons', []))} ders, saatler elle girilmiş"
+            else:
+                text = f"{t['lesson_count']} ders · {t['lesson_minutes']} dk · ilk ders {t['first_lesson']}"
+            if p.get("day_overrides"):
+                text += " · güne özel saatler var"
+            return text
+
+        def act(fn):
+            """Önce ekrandaki girişleri al, sonra işlemi yap ve sekmeleri yeniden çiz."""
+            if not self._collect():
+                return
+            fn()
+            self._build_tabs(keep="Programlar")
+
+        b = self._card(f, "Kayıtlı Zil Programları")
+        if not cfg["profiles"]:
+            ctk.CTkLabel(b, text="Henüz kayıtlı program yok.", text_color=theme.MUTED).grid(row=0, column=0, sticky="w")
+        for r, (name, p) in enumerate(sorted(cfg["profiles"].items())):
+            ctk.CTkLabel(b, text=name, font=theme.font(14, "bold"), anchor="w").grid(row=r, column=0, sticky="w")
+            ctk.CTkLabel(b, text=summary(p), text_color=theme.MUTED, anchor="w").grid(
+                row=r, column=1, sticky="w", padx=12)
+            row = ctk.CTkFrame(b, fg_color="transparent")
+            row.grid(row=r, column=2, sticky="e", pady=3)
+
+            def use(name=name):
+                cfg.update(copy.deepcopy(cfg["profiles"][name]))
+                messagebox.showinfo("Zil programı", f"«{name}» programı yüklendi. Her gün kullanılması için "
+                                                    "«Kaydet»e basın.", parent=self)
+
+            def overwrite(name=name):
+                cfg["profiles"][name] = config.profile_snapshot(cfg)
+
+            def delete(name=name):
+                del cfg["profiles"][name]
+                cfg["profile_dates"] = [d for d in cfg["profile_dates"] if d.get("profile") != name]
+            ctk.CTkButton(row, text="Her gün kullan", width=110, command=lambda u=use: act(u)).pack(side="left")
+            ctk.CTkButton(row, text="Şu anki ayarlarla güncelle", width=170, fg_color="transparent", border_width=1,
+                          text_color=theme.TEXT, command=lambda o=overwrite: act(o)).pack(side="left", padx=6)
+            ctk.CTkButton(row, text="Sil", width=50, fg_color=theme.DANGER, hover_color=theme.DANGER_HOVER,
+                          command=lambda d=delete: act(d)).pack(side="left")
+
+        b = self._card(f, "Yeni Program", "Şu anki ders saatleri ve ayarlar yeni bir program olarak kaydedilir.")
+        name_e = ctk.CTkEntry(b, width=260, placeholder_text="Program adı (ör. Sınav Haftası)")
+        name_e.grid(row=0, column=0, sticky="w")
+
+        def save_new():
+            name = name_e.get().strip()
+            if not name:
+                messagebox.showerror("Program adı", "Lütfen programa bir ad verin.", parent=self)
+                return
+            act(lambda: cfg["profiles"].__setitem__(name, config.profile_snapshot(cfg)))
+
+        def add_short():
+            snap = config.profile_snapshot(cfg)
+            snap.update(schedule_mode="auto", day_overrides={})
+            snap["timing"]["lesson_minutes"] = 30
+            cfg["profiles"]["Kısaltılmış Ders (30 dk)"] = snap
+        ctk.CTkButton(b, text="Kaydet", width=90, command=save_new).grid(row=0, column=1, padx=8, sticky="w")
+        ctk.CTkButton(b, text="Hazır örnek ekle: Kısaltılmış Ders (30 dk)", fg_color="transparent", border_width=1,
+                      text_color=theme.TEXT, command=lambda: act(add_short)).grid(row=0, column=2, sticky="w")
+
+        b = self._card(f, "Tarihlere Atanmış Programlar",
+                       "Seçilen tarihte normal ayarlar yerine o program kullanılır. Tarih: GG.AA.YYYY")
+        names = sorted(cfg["profiles"])
+        rows = []
+        holder = ctk.CTkFrame(b, fg_color="transparent")
+        holder.grid(row=0, column=0, columnspan=4, sticky="w")
+
+        def add_row(date="", profile=None):
+            if not names:
+                messagebox.showinfo("Program yok", "Önce bir zil programı kaydedin.", parent=self)
+                return
+            r = ctk.CTkFrame(holder, fg_color="transparent")
+            r.pack(fill="x", pady=2)
+            d = ctk.CTkEntry(r, width=120, placeholder_text="GG.AA.YYYY")
+            if date:
+                try:
+                    d.insert(0, dt.date.fromisoformat(date).strftime("%d.%m.%Y"))
+                except ValueError:
+                    d.insert(0, date)
+            d.pack(side="left")
+            m = ctk.CTkOptionMenu(r, values=names, width=240)
+            m.set(profile if profile in names else names[0])
+            m.pack(side="left", padx=8)
+            item = (r, d, m)
+            ctk.CTkButton(r, text="✕", width=30, fg_color="transparent", text_color=theme.DANGER,
+                          hover_color=theme.ROW_ALT, command=lambda: (r.destroy(), rows.remove(item))).pack(side="left")
+            rows.append(item)
+
+        for item in sorted(cfg["profile_dates"], key=lambda x: x.get("date", "")):
+            if item.get("profile") in names:
+                add_row(item.get("date", ""), item.get("profile"))
+        ctk.CTkButton(b, text="+ Tarih ekle", width=110, command=add_row).grid(row=1, column=0, sticky="w", pady=(8, 0))
+
+        def collect():
+            out = []
+            for _, d, m in rows:
+                if not d.get().strip():
+                    continue
+                try:
+                    day = dt.datetime.strptime(d.get().strip(), "%d.%m.%Y").date()
+                except ValueError:
+                    raise ValueError(f"Programlar: «{d.get()}» geçerli bir tarih değil. GG.AA.YYYY biçiminde yazın.")
+                out.append({"date": day.isoformat(), "profile": m.get()})
+            cfg["profile_dates"] = out
+        self._collectors.append(collect)
+
     def _tab_system(self, f):
+        if self._at_least("profesyonel"):
+            b = self._card(f, "Teknik Ayarlar (Profesyonel)")
+            grace = Spin(b, self.cfg.get("grace_seconds", 45), 5, 600, suffix="saniye")
+            labeled_row(b, 0, "Geç kalan zil süresi", grace,
+                        "Bilgisayar zil anında meşgulse, zil bu süre içinde yine çalar.")
+            prep = ctk.BooleanVar(value=self.cfg.get("prepare_announcements", True))
+            ctk.CTkCheckBox(b, text="Günün anonslarını önceden hazırla (önerilir)", variable=prep).grid(
+                row=1, column=0, columnspan=3, sticky="w", pady=4)
+
+            def collect():
+                try:
+                    self.cfg["grace_seconds"] = grace.get()
+                except ValueError as exc:
+                    raise ValueError(f"Geç kalan zil süresi: {exc}")
+                self.cfg["prepare_announcements"] = bool(prep.get())
+            self._collectors.append(collect)
+
         b = self._card(f, "Yedekleme", "Ayarları bir dosyaya kaydedip başka bir bilgisayara aktarabilirsiniz.")
         row = ctk.CTkFrame(b, fg_color="transparent")
         row.grid(row=0, column=0, sticky="w")

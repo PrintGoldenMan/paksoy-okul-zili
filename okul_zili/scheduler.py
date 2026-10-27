@@ -8,8 +8,16 @@ from . import schedule, tts
 
 log = logging.getLogger(__name__)
 
-# Program zil saatinden biraz sonra açılırsa/uyanırsa bu süre içinde zil yine çalar.
+# Program zil saatinden biraz sonra açılırsa/uyanırsa bu süre içinde zil yine çalar
+# (Profesyonel düzeyde "grace_seconds" ile değiştirilebilir).
 GRACE_SECONDS = 45
+
+
+def _grace(cfg) -> int:
+    try:
+        return max(5, min(600, int(cfg.get("grace_seconds", GRACE_SECONDS))))
+    except (TypeError, ValueError):
+        return GRACE_SECONDS
 
 
 class BellScheduler:
@@ -41,7 +49,9 @@ class BellScheduler:
         self._refresh(now)
         m = now.hour * 60 + now.minute
         for e in self._events:
-            if e.minute > m or (e.minute == m and e.key not in self._fired and now.second < GRACE_SECONDS):
+            if e.off:
+                continue
+            if e.minute > m or (e.minute == m and e.key not in self._fired):
                 return e
         return None
 
@@ -61,10 +71,10 @@ class BellScheduler:
             # Program açıldığında zamanı çoktan geçmiş zilleri "çalındı" say.
             sec = now.hour * 3600 + now.minute * 60 + now.second
             for e in self._events:
-                if sec - e.minute * 60 > GRACE_SECONDS:
+                if sec - e.minute * 60 > _grace(cfg):
                     self._fired.add(e.key)
-            if cfg["tts"].get("enabled"):
-                tts.prepare_async([e.text for e in self._events if e.tts], cfg["tts"])
+            if cfg["tts"].get("enabled") and cfg.get("prepare_announcements", True):
+                tts.prepare_async([e.text for e in self._events if e.tts and not e.off], cfg["tts"])
 
     def _loop(self):
         stop = threading.Event()
@@ -78,13 +88,16 @@ class BellScheduler:
         self._refresh(now)
         cfg = self._get_config()
         sec = now.hour * 3600 + now.minute * 60 + now.second
+        grace = _grace(cfg)
         for e in self._events:
             if e.key in self._fired:
                 continue
             delta = sec - e.minute * 60
-            if 0 <= delta <= GRACE_SECONDS:
+            if 0 <= delta <= grace:
                 self._fired.add(e.key)
-                if not cfg.get("auto_ring", True):
+                if e.off:
+                    log.info("Zil kapalı (%s), çalınmadı: %s %s", e.off, e.time_str, e.label)
+                elif not cfg.get("auto_ring", True):
                     log.info("Otomatik zil kapalı, çalınmadı: %s %s", e.time_str, e.label)
                 elif cfg.get("skip_date") == now.date().isoformat():
                     log.info("Bugün ziller kapalı, çalınmadı: %s %s", e.time_str, e.label)
@@ -92,5 +105,5 @@ class BellScheduler:
                     log.info("Zil çalıyor: %s %s", e.time_str, e.label)
                     self._player.ring(e)
                 self._on_ring(e)
-            elif delta > GRACE_SECONDS:
+            elif delta > grace:
                 self._fired.add(e.key)

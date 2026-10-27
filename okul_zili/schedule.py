@@ -35,6 +35,14 @@ class BellEvent:
     repeat: int = 1
     volume: int = 100
     extra: dict = field(default_factory=dict)
+    off: str = ""        # boş değilse zil çalmaz: "Kapalı" veya "Bugün kapalı"
+
+    @property
+    def bell_id(self) -> str:
+        """Saatten bağımsız kalıcı kimlik (ör. "ogretmen-1")."""
+        if self.kind == "ek":
+            return f"ek-{self.label}-{self.time_str}"
+        return f"{self.kind}-{self.lesson}"
 
     @property
     def time_str(self) -> str:
@@ -54,6 +62,24 @@ def auto_lessons(timing: dict) -> list:
         gap = int(timing["lunch_minutes"]) if i == int(timing["lunch_after"]) else int(timing["break_minutes"])
         t = end + gap
     return lessons
+
+
+def config_for_date(cfg: dict, date: dt.date) -> dict:
+    """O tarihe bir zil programı atanmışsa, programın ayarlarıyla birleştirilmiş ayarları döndürür."""
+    iso = date.isoformat()
+    for item in cfg.get("profile_dates", []):
+        profile = cfg.get("profiles", {}).get(item.get("profile"))
+        if item.get("date") == iso and profile:
+            return dict(cfg, **profile)
+    return cfg
+
+
+def profile_name_for_date(cfg: dict, date: dt.date):
+    iso = date.isoformat()
+    for item in cfg.get("profile_dates", []):
+        if item.get("date") == iso and item.get("profile") in cfg.get("profiles", {}):
+            return item["profile"]
+    return None
 
 
 def lessons_for_weekday(cfg: dict, weekday: int) -> list:
@@ -121,13 +147,18 @@ def events_for_lessons(cfg: dict, lessons: list) -> list:
         if offset > 0:
             student = start - offset
             if prev_end is None:
-                if timing.get("morning_student_bell", True):
-                    events.append(_bell(cfg, student, "ogrenci", i, "", "Öğrenciler sınıfa girer"))
+                e = _bell(cfg, student, "ogrenci", i, "", "Öğrenciler sınıfa girer")
+                if not timing.get("morning_student_bell", True):
+                    e.off = "Kapalı"   # Sabah Zilleri ayarından kapatıldı; listede görünür ama çalmaz
+                events.append(e)
             elif student > prev_end:
                 note = "Öğle arası bitmek üzere" if start - prev_end > int(timing["break_minutes"]) + 5 \
                     else "Teneffüs bitmek üzere"
                 events.append(_bell(cfg, student, "ogrenci", i, "", note))
-        events.append(_bell(cfg, start, "ogretmen", i, "", f"{i}. ders başlar"))
+        e = _bell(cfg, start, "ogretmen", i, "", f"{i}. ders başlar")
+        if i == 1 and not timing.get("morning_teacher_bell", True):
+            e.off = "Kapalı"
+        events.append(e)
         if i == len(lessons):
             variant, note = "last", "Okul dağılır"
         else:
@@ -159,11 +190,26 @@ def extra_events(cfg: dict, weekday: int) -> list:
     return out
 
 
+def is_disabled(cfg: dict, weekday: int, bell_id: str) -> bool:
+    d = cfg.get("disabled_bells", {})
+    return bell_id in d.get("all", []) or bell_id in d.get(str(weekday), [])
+
+
 def events_for_date(cfg: dict, date: dt.date) -> list:
     if not is_school_day(cfg, date):
         return []
+    cfg = config_for_date(cfg, date)
     events = events_for_lessons(cfg, lessons_for_weekday(cfg, date.weekday()))
     events += extra_events(cfg, date.weekday())
+    skip = cfg.get("skip_today") or {}
+    skipped = skip.get("ids", []) if skip.get("date") == date.isoformat() else []
+    for e in events:
+        if e.off:
+            continue
+        if is_disabled(cfg, date.weekday(), e.bell_id):
+            e.off = "Kapalı"
+        elif e.bell_id in skipped:
+            e.off = "Bugün kapalı"
     events.sort(key=lambda e: (e.minute, {"cikis": 0, "ek": 1, "ogrenci": 2, "ogretmen": 3}[e.kind]))
     return events
 
@@ -174,6 +220,7 @@ def current_status(cfg: dict, now: dt.datetime):
     if not is_school_day(cfg, date):
         name = holiday_name(cfg, date)
         return ("Bugün tatil" if name else "Bugün ders yok", name or "Ziller çalmayacak", None)
+    cfg = config_for_date(cfg, date)
     lessons = lessons_for_weekday(cfg, date.weekday())
     if not lessons:
         return ("Bugün ders yok", "Ders saati tanımlı değil", None)

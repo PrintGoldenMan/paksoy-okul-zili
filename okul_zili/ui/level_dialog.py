@@ -1,14 +1,15 @@
-"""Ayar düzeyi seçimi: Basit -> Gelişmiş -> Uzman."""
+"""Ayar düzeyi seçimi: Çok Kolay -> Basit -> Gelişmiş -> Uzman -> Profesyonel."""
 
 import customtkinter as ctk
 
 from ..config import LEVEL_DESCRIPTIONS, LEVEL_NAMES, LEVELS
 from . import theme
 
-LEVEL_ICONS = {"basit": "●", "gelismis": "●●", "uzman": "●●●"}
-LEVEL_FOR = {"basit": "Okul müdürleri ve günlük kullanım için",
+LEVEL_FOR = {"kolay": "Hiç ayarla uğraşmak istemeyenler için",
+             "basit": "Okul müdürleri ve günlük kullanım için",
              "gelismis": "Ders saatlerini, tatilleri ve anonsları yönetmek için",
-             "uzman": "Her ayarı kendisi yapmak isteyenler için"}
+             "uzman": "Her ayarı kendisi yapmak isteyenler için",
+             "profesyonel": "Birden çok zil programı yönetenler için"}
 
 
 class LevelDialog(ctk.CTkToplevel):
@@ -25,14 +26,14 @@ class LevelDialog(ctk.CTkToplevel):
                      font=theme.font(22, "bold")).pack(padx=30, pady=(26, 4))
         ctk.CTkLabel(self, text="Düzey, ayarlar ekranında ne kadar seçenek görüneceğini belirler. "
                                 "Daha sonra Ayarlar'dan istediğiniz zaman değiştirebilirsiniz.",
-                     text_color=theme.MUTED, wraplength=760).pack(padx=30, pady=(0, 18))
+                     text_color=theme.MUTED, wraplength=1000).pack(padx=30, pady=(0, 18))
 
         row = ctk.CTkFrame(self, fg_color="transparent")
         row.pack(padx=24, pady=(0, 10))
         for i, level in enumerate(LEVELS):
             if i:
-                ctk.CTkLabel(row, text="→", font=theme.font(26, "bold"), text_color=theme.MUTED).pack(
-                    side="left", padx=4)
+                ctk.CTkLabel(row, text="→", font=theme.font(22, "bold"), text_color=theme.MUTED).pack(
+                    side="left", padx=2)
             self._card(row, level, level == current).pack(side="left", padx=6, fill="y")
 
         ctk.CTkLabel(self, text="Emin değilseniz «Basit» ile başlayın.",
@@ -48,19 +49,20 @@ class LevelDialog(ctk.CTkToplevel):
             pass
 
     def _card(self, master, level, selected):
-        card = ctk.CTkFrame(master, fg_color=theme.CARD_BG, corner_radius=16, width=230,
+        card = ctk.CTkFrame(master, fg_color=theme.CARD_BG, corner_radius=16, width=200,
                             border_width=3 if selected else 1,
                             border_color=theme.ACCENT if selected else ("#d5dbe3", "#2f353d"))
-        ctk.CTkLabel(card, text=LEVEL_ICONS[level], font=theme.font(20, "bold"),
-                     text_color=theme.ACCENT).pack(pady=(18, 0))
-        ctk.CTkLabel(card, text=LEVEL_NAMES[level], font=theme.font(22, "bold")).pack()
-        ctk.CTkLabel(card, text=LEVEL_FOR[level], font=theme.font(12, "bold"),
-                     text_color=theme.MUTED, wraplength=200).pack(padx=14, pady=(2, 8))
-        ctk.CTkLabel(card, text=LEVEL_DESCRIPTIONS[level], wraplength=200, justify="left",
-                     font=theme.font(13), height=120, anchor="nw").pack(padx=16, fill="x")
-        ctk.CTkButton(card, text="Seçili ✓" if selected else "Bunu Seç", height=38,
+        rank = LEVELS.index(level) + 1
+        ctk.CTkLabel(card, text="●" * rank + "○" * (len(LEVELS) - rank), font=theme.font(16, "bold"),
+                     text_color=theme.ACCENT).pack(pady=(16, 0))
+        ctk.CTkLabel(card, text=LEVEL_NAMES[level], font=theme.font(20, "bold")).pack()
+        ctk.CTkLabel(card, text=LEVEL_FOR[level], font=theme.font(12, "bold"), height=34,
+                     text_color=theme.MUTED, wraplength=170).pack(padx=12, pady=(2, 6))
+        ctk.CTkLabel(card, text=LEVEL_DESCRIPTIONS[level], wraplength=172, justify="left",
+                     font=theme.font(12), height=150, anchor="nw").pack(padx=12, fill="x")
+        ctk.CTkButton(card, text="Seçili ✓" if selected else "Bunu Seç", height=36,
                       font=theme.font(14, "bold"),
-                      command=lambda: self._choose(level)).pack(padx=16, pady=16, fill="x")
+                      command=lambda: self._choose(level)).pack(padx=12, pady=14, fill="x")
         return card
 
     def _choose(self, level):

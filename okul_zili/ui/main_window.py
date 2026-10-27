@@ -28,6 +28,7 @@ class MainWindow(ctk.CTk):
         self._schedule_signature = None
         self._row_widgets = []
         self._settings = None
+        self._row_toggles = False
 
         self.grid_columnconfigure(0, weight=5, uniform="c")
         self.grid_columnconfigure(1, weight=4, uniform="c")
@@ -158,7 +159,8 @@ class MainWindow(ctk.CTk):
         self.school_lbl.configure(text=cfg["school_name"])
         level = cfg.get("level") or "basit"
         self.level_btn.configure(text=f"Düzey: {LEVEL_NAMES[level]}")
-        if level == "basit" or not cfg["tts"].get("enabled"):
+        self._row_toggles = config.LEVELS.index(level) >= config.LEVELS.index("gelismis")
+        if level in ("kolay", "basit") or not cfg["tts"].get("enabled"):
             self.announce_btn.grid_remove()
         else:
             self.announce_btn.grid()
@@ -190,6 +192,12 @@ class MainWindow(ctk.CTk):
             chip.grid(row=0, column=1, padx=4)
             note = ctk.CTkLabel(row, text=e.note, anchor="w", font=theme.font(12))
             note.grid(row=0, column=2, sticky="ew", padx=(8, 4))
+            if self._row_toggles and e.off != "Kapalı":
+                # Yalnızca bugün için bu zili kapat / aç
+                ctk.CTkButton(row, text="Aç" if e.off else "Kapat", width=58, height=26,
+                              font=theme.font(11), fg_color="transparent", border_width=1,
+                              text_color=theme.TEXT, hover_color=theme.ROW_NEXT,
+                              command=lambda e=e: self._toggle_bell_today(e)).grid(row=0, column=3, padx=(4, 8))
             row._parts = (t, chip, note, i)
             row._event = e
             self._row_widgets.append(row)
@@ -210,10 +218,15 @@ class MainWindow(ctk.CTk):
             done = sched.was_fired(e)
             is_next = next_event is not None and e.key == next_event.key
             row.configure(fg_color=theme.ROW_NEXT if is_next else (theme.ROW_ALT if i % 2 else "transparent"))
-            color = theme.MUTED if done else theme.TEXT
+            color = theme.MUTED if done or e.off else theme.TEXT
             t.configure(text_color=color)
-            note.configure(text_color=color, text=("✓ " if done else "") + e.note)
-            chip.configure(fg_color=("#b9c0c9", "#4a515a") if done else theme.BELL_COLORS[e.kind])
+            if e.off:
+                text = f"🔕 {e.off}"
+            else:
+                text = ("✓ " if done else "") + e.note
+            note.configure(text_color=color, text=text)
+            grey = done or e.off
+            chip.configure(fg_color=("#b9c0c9", "#4a515a") if grey else theme.BELL_COLORS[e.kind])
 
     def _tick(self, reschedule=True):
         now = dt.datetime.now()
@@ -231,7 +244,7 @@ class MainWindow(ctk.CTk):
             self.progress.set(prog)
 
         events = self.app.scheduler.today_events()
-        sig = (now.date(), tuple(e.key + e.note for e in events))
+        sig = (now.date(), self._row_toggles, tuple(e.key + e.note + e.off for e in events))
         if sig != self._schedule_signature:
             self._schedule_signature = sig
             self._rebuild_list(events)
@@ -240,8 +253,17 @@ class MainWindow(ctk.CTk):
             if name:
                 self.day_info.configure(text=f"Tatil: {name}")
             elif events:
-                lessons = schedule.lessons_for_weekday(cfg, now.weekday())
-                self.day_info.configure(text=f"{len(lessons)} ders · {len(events)} zil")
+                lessons = schedule.lessons_for_weekday(schedule.config_for_date(cfg, now.date()), now.weekday())
+                active = sum(1 for e in events if not e.off)
+                text = f"{len(lessons)} ders · {active} zil"
+                if active != len(events):
+                    text += f" ({len(events) - active} zil kapalı)"
+                if self._row_toggles:
+                    text += " · «Kapat» zili yalnızca bugün susturur"
+                profile = schedule.profile_name_for_date(cfg, now.date())
+                if profile:
+                    text += f" · Program: {profile}"
+                self.day_info.configure(text=text)
             else:
                 self.day_info.configure(text="Okul günü değil")
 
@@ -283,6 +305,16 @@ class MainWindow(ctk.CTk):
 
     def _toggle_auto(self):
         self.app.update_config(auto_ring=bool(self.auto_var.get()))
+
+    def _toggle_bell_today(self, event):
+        today = dt.date.today().isoformat()
+        skip = dict(self.app.cfg.get("skip_today") or {})
+        ids = list(skip.get("ids", [])) if skip.get("date") == today else []
+        if event.bell_id in ids:
+            ids.remove(event.bell_id)
+        else:
+            ids.append(event.bell_id)
+        self.app.update_config(skip_today={"date": today, "ids": ids})
 
     def _toggle_skip(self):
         self.app.update_config(skip_date=dt.date.today().isoformat() if self.skip_var.get() else None)

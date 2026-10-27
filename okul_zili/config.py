@@ -8,15 +8,20 @@ from . import paths
 
 log = logging.getLogger(__name__)
 
-LEVELS = ["basit", "gelismis", "uzman"]
-LEVEL_NAMES = {"basit": "Basit", "gelismis": "Gelişmiş", "uzman": "Uzman"}
+LEVELS = ["kolay", "basit", "gelismis", "uzman", "profesyonel"]
+LEVEL_NAMES = {"kolay": "Çok Kolay", "basit": "Basit", "gelismis": "Gelişmiş", "uzman": "Uzman",
+               "profesyonel": "Profesyonel"}
 LEVEL_DESCRIPTIONS = {
+    "kolay": "Tek sayfa: ses düzeyi, sabah zillerini açma/kapatma ve otomatik başlatma. "
+             "Ders saatleri okulun programına göre hazır gelir.",
     "basit": "Yalnızca gerekli ayarlar: ders başlangıcı, ders ve teneffüs süreleri, "
              "zil sesleri. Hızlı ve kolay kullanım için önerilir.",
     "gelismis": "Basit düzeye ek olarak: ders saatlerini tek tek düzenleme, okul günleri, "
                 "tatiller, kendi ses dosyalarınız ve Türkçe sesli anonslar.",
     "uzman": "Her şey ayarlanabilir: güne özel ders saatleri, ek ziller (İstiklal Marşı, "
-             "tören vb.), anons sesi ve hızı, yedekleme, kayıtlar ve otomatik başlatma.",
+             "tören vb.), anons sesi ve hızı, yedekleme ve kayıtlar.",
+    "profesyonel": "Uzman düzeye ek olarak: her zili tek tek açıp kapatma, birden çok zil programı "
+                   "(ör. kısaltılmış ders, sınav haftası) ve bunları belirli tarihlere atama, teknik ayarlar.",
 }
 
 BELL_TYPES = ["ogrenci", "ogretmen", "cikis"]
@@ -39,7 +44,8 @@ DEFAULTS = {
         "lunch_after": 5,
         "lunch_minutes": 40,
         "student_offset": 2,
-        "morning_student_bell": True,
+        "morning_student_bell": True,   # ilk dersten önceki öğrenci zili (08:28)
+        "morning_teacher_bell": True,   # ilk dersin öğretmen zili (08:30)
     },
     # "auto": süreler kullanılarak hesaplanır, "manual": ders saatleri tek tek girilir.
     "schedule_mode": "auto",
@@ -80,9 +86,27 @@ DEFAULTS = {
     # [{"enabled": true, "time": "08:25", "days": [0], "label": "İstiklal Marşı",
     #   "sound": "builtin:gong", "text": ""}]
     "extra_bells": [],
+    # Profesyonel düzey: kalıcı olarak kapatılan ziller, ör. {"all": ["cikis-8"], "4": ["ogrenci-6"]}
+    # Kimlikler "tür-dersno" biçimindedir; böylece ders saatleri değişse de geçerli kalır.
+    "disabled_bells": {},
+    # Ana ekrandan yalnızca bugün için kapatılan ziller: {"date": "2026-10-27", "ids": ["ogretmen-1"]}
+    "skip_today": {"date": None, "ids": []},
+    # Profesyonel düzey: adlandırılmış zil programları ve belirli tarihlere atanmaları
+    "profiles": {},
+    "profile_dates": [],   # [{"date": "2026-11-10", "profile": "Kısaltılmış Ders"}]
+    "grace_seconds": 45,
+    "prepare_announcements": True,
     "skip_date": None,  # "Bugün zilleri kapat" seçildiğinde o günün tarihi
     "autostart": False,
 }
+
+
+# Bir zil programını oluşturan ayarlar (Profesyonel düzeydeki "Zil Programları" bunları saklar).
+PROFILE_KEYS = ["timing", "schedule_mode", "manual_lessons", "day_overrides", "disabled_bells"]
+
+
+def profile_snapshot(cfg: dict) -> dict:
+    return {k: copy.deepcopy(cfg[k]) for k in PROFILE_KEYS}
 
 
 def _merge(defaults, loaded):
