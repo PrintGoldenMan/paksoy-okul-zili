@@ -8,7 +8,7 @@ import time
 import customtkinter as ctk
 from tkinter import messagebox
 
-from .. import APP_NAME, __version__, config, paths, schedule, sounds
+from .. import APP_NAME, __version__, config, paths, rotation, schedule, sounds
 from ..config import BELL_NAMES, LEVEL_NAMES
 from ..turkish import long_date
 from . import theme
@@ -159,7 +159,8 @@ class MainWindow(ctk.CTk):
             text, btn, self._banner_kind = ("⚠  BUGÜN ZİLLER KAPALI – yarın otomatik olarak açılır",
                                             "Bugün de çalsın", "skip")
         else:
-            missing = [BELL_NAMES[k] for k in config.BELL_TYPES if sounds.is_missing(cfg["bells"][k].get("sound", ""))]
+            missing = [BELL_NAMES[k] for k in config.BELL_TYPES
+                       if sounds.is_missing(rotation.effective_sound(cfg["bells"][k]))]
             if missing:
                 danger = False
                 self._banner_kind = "sound"
@@ -395,6 +396,7 @@ class MainWindow(ctk.CTk):
 
     def _update(self, now):
         self._check_size()
+        self.app.check_rotation(now)
         cfg = self.app.cfg
         self.clock_lbl.configure(text=now.strftime("%H:%M:%S"))
         self.date_lbl.configure(text=long_date(now.date()))

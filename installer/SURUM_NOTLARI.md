@@ -23,6 +23,9 @@ Program kendi zil sesiyle gelmez; sesleri siz seçersiniz:
 Şarkının yalnızca bir kısmını istiyorsanız «Yalnızca bir bölümünü indir» kutusunu işaretleyip başlangıç ve
 bitişi yazın (ör. 5:30 – 5:35).
 
+Her hafta (ya da her gün / her ay) farklı bir şarkı çalması için Ayarlar → Zil Sesleri'nde
+**«🔀 Ses düzenli olarak değişsin»** seçeneğini açıp kütüphaneden birden fazla ses işaretleyin.
+
 Ses seçilmemiş zil sessiz kalmaz, Windows uyarı sesi çalar; ana ekranda sarı uyarı görünür.
 Oynatma listesi bağlantısı yapıştırılırsa program iki kez uyarır.
 

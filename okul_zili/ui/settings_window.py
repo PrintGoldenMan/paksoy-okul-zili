@@ -19,7 +19,7 @@ import sys
 import customtkinter as ctk
 from tkinter import filedialog, messagebox
 
-from .. import autostart, config, library, paths, schedule, sounds, tts
+from .. import autostart, config, library, paths, rotation, schedule, sounds, tts
 from ..config import (BELL_NAMES, BELL_TYPES, DEFAULT_RING_SECONDS, LEVEL_DESCRIPTIONS, LEVEL_NAMES, LEVELS,
                       MAX_RING_SECONDS, MIN_RING_SECONDS, ring_seconds)
 from ..schedule import fmt_hm, parse_hm
@@ -89,17 +89,145 @@ class SoundPicker(ctk.CTkFrame):
                 self.refresh()
                 return
 
-    def _preview(self):
-        duration = None
+    def preview_duration(self):
         if self.duration_spin is not None:
             try:
-                duration = self.duration_spin.get()
+                return self.duration_spin.get()
             except ValueError:
-                duration = None
-        self.player.preview_sound(self.sound_id, duration)
+                return None
+        return None
+
+    def _preview(self):
+        self.player.preview_sound(self.sound_id, self.preview_duration())
+
+    def set_locked(self, locked):
+        """Değişen ses açıkken tek ses seçimi kullanılmaz; kutu kilitlenir."""
+        self.menu.configure(state="disabled" if locked else "normal")
+        if locked:
+            self.length_lbl.configure(text="(değişen ses açık – aşağıdaki seçim kullanılır)")
+        else:
+            self._show_length()
 
     def get(self):
         return self.sound_id
+
+
+class RotationPanel(ctk.CTkFrame):
+    """Değişen zil sesi: kütüphaneden seçilen seslerden her gün/hafta/ay rastgele biri çalar."""
+
+    def __init__(self, master, player, bell, picker, open_library):
+        super().__init__(master, fg_color="transparent")
+        self.player = player
+        self.picker = picker
+        self.open_library = open_library
+        self.rot = copy.deepcopy(bell.get("rotation") or rotation.DEFAULT)
+        self._orig_period = self.rot.get("period", "week")
+        self.enabled = ctk.BooleanVar(value=bool(self.rot.get("enabled")))
+        ctk.CTkSwitch(self, text="🔀  Ses düzenli olarak değişsin (seçtiğiniz seslerden rastgele)",
+                      variable=self.enabled, command=self._toggle, font=theme.font(13, "bold")).pack(anchor="w")
+        self.body = ctk.CTkFrame(self, fg_color=theme.ROW_ALT, corner_radius=10)
+        top = ctk.CTkFrame(self.body, fg_color="transparent")
+        top.pack(fill="x", padx=12, pady=(10, 4))
+        ctk.CTkLabel(top, text="Ne sıklıkla değişsin:").pack(side="left")
+        self.period = ctk.CTkSegmentedButton(top, values=list(rotation.PERIODS.values()), command=self._period_changed)
+        self.period.set(rotation.PERIODS.get(self.rot.get("period"), "Her hafta"))
+        self.period.pack(side="left", padx=8)
+        ctk.CTkLabel(self.body, text="Hangi sesler arasından seçilsin? (en az 1; her yeni dönemde bir öncekinden "
+                                     "farklı biri seçilir)", text_color=theme.MUTED, font=theme.font(12)).pack(
+            anchor="w", padx=12)
+        self.list = ctk.CTkFrame(self.body, fg_color="transparent")
+        self.list.pack(fill="x", padx=12, pady=4)
+        cur = ctk.CTkFrame(self.body, fg_color="transparent")
+        cur.pack(fill="x", padx=12, pady=(4, 10))
+        self.current_lbl = ctk.CTkLabel(cur, text="", anchor="w")
+        self.current_lbl.pack(side="left")
+        ctk.CTkButton(cur, text="Şimdi değiştir", width=110, fg_color="transparent", border_width=1,
+                      text_color=theme.TEXT, command=self._change_now).pack(side="right")
+        ctk.CTkButton(cur, text="▶ Dinle", width=80, command=self._preview).pack(side="right", padx=8)
+        self.vars = {}
+        self.refresh()
+        self._toggle()
+
+    def refresh(self):
+        """Kütüphane değişince ses listesini yeniden çizer (işaretler korunur)."""
+        checked = set(self.selected()) if self.vars else set(self.rot.get("pool") or [])
+        for w in self.list.winfo_children():
+            w.destroy()
+        self.vars = {}
+        items = library.get_library().items()
+        if not items:
+            ctk.CTkLabel(self.list, text="Kütüphane boş.", text_color=theme.MUTED).pack(side="left")
+            ctk.CTkButton(self.list, text="🎵 Kütüphaneyi aç", width=140, command=self.open_library).pack(
+                side="left", padx=8)
+        for i, item in enumerate(items):
+            sid = library.PREFIX + item["id"]
+            var = ctk.BooleanVar(value=sid in checked)
+            ctk.CTkCheckBox(self.list, text=item["title"], variable=var, command=self._update_current,
+                            width=330).grid(row=i // 2, column=i % 2, sticky="w", pady=2, padx=(0, 10))
+            self.vars[sid] = var
+        self._update_current()
+        if hasattr(self, "enabled"):
+            self.picker.set_locked(self.enabled.get())
+
+    def selected(self):
+        return [sid for sid, v in self.vars.items() if v.get()]
+
+    def _period_key_now(self):
+        period = next(k for k, v in rotation.PERIODS.items() if v == self.period.get())
+        return period, rotation.period_key(period, dt.date.today())
+
+    def _period_changed(self, _value):
+        self._update_current()
+
+    def _toggle(self):
+        on = self.enabled.get()
+        if on:
+            self.body.pack(fill="x", pady=(6, 0))
+        else:
+            self.body.pack_forget()
+        self.picker.set_locked(on)
+        self._update_current()
+
+    def _current(self):
+        pool = self.selected()
+        cur = self.rot.get("current", "")
+        return cur if cur in pool else (pool[0] if pool else "")
+
+    def _update_current(self):
+        period, _ = self._period_key_now()
+        pool = self.selected()
+        if not pool:
+            self.current_lbl.configure(text="⚠ En az bir ses seçin.", text_color=theme.DANGER)
+            return
+        text = f"{rotation.PERIOD_THIS[period]} sesi: {sounds.display_name(self._current())}"
+        if self.rot.get("current") not in pool:
+            text += "   (kaydedince seçilir)"
+        self.current_lbl.configure(text=text, text_color=theme.TEXT)
+
+    def _change_now(self):
+        pool = self.selected()
+        if not pool:
+            return
+        self.rot["current"] = rotation.pick(pool, exclude=self._current())
+        self.rot["key"] = self._period_key_now()[1]
+        self._update_current()
+        self.current_lbl.configure(text=self.current_lbl.cget("text") + "   (Kaydet'e basınca geçerli olur)")
+
+    def _preview(self):
+        sid = self._current()
+        if sid:
+            self.player.preview_sound(sid, self.picker.preview_duration())
+
+    def get(self, bell_name):
+        period, key = self._period_key_now()
+        pool = self.selected()
+        if self.enabled.get() and not pool:
+            raise ValueError(f"{bell_name}: «Ses düzenli olarak değişsin» açık, ancak hiç ses seçilmedi. "
+                             "En az bir ses işaretleyin ya da bu özelliği kapatın.")
+        rot = dict(self.rot, enabled=bool(self.enabled.get()), period=period, pool=pool)
+        if period != self._orig_period and rot.get("current") in pool:
+            rot["key"] = key   # sıklık değişince şu anki ses yeni dönemin sesi olarak kalsın
+        return rot
 
 
 class LessonTable(ctk.CTkFrame):
@@ -576,7 +704,10 @@ class SettingsWindow(ctk.CTkToplevel):
                                  duration_spin=dur)
             picker.grid(row=0, column=1, sticky="w")
             self._pickers.append(picker)
-            widgets = {"picker": picker, "duration": dur}
+            rot = RotationPanel(b, self.app.player, bell, picker, self._open_library)
+            rot.grid(row=2, column=1, columnspan=9, sticky="ew", pady=(10, 0))
+            self._pickers.append(rot)
+            widgets = {"picker": picker, "duration": dur, "rotation": rot}
             if self._at_least("uzman"):
                 ctk.CTkLabel(opt, text="Bu zilin ses düzeyi:").pack(side="left")
                 v = ctk.CTkSlider(opt, from_=10, to=100, number_of_steps=18, width=180)
@@ -594,6 +725,7 @@ class SettingsWindow(ctk.CTkToplevel):
             cfg["master_volume"] = int(vol.get())
             for kind, w in pickers.items():
                 cfg["bells"][kind]["sound"] = w["picker"].get()
+                cfg["bells"][kind]["rotation"] = w["rotation"].get(BELL_NAMES[kind])
                 try:
                     cfg["bells"][kind]["duration"] = w["duration"].get()
                 except ValueError as exc:

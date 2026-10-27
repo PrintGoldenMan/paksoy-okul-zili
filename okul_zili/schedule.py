@@ -3,6 +3,7 @@
 import datetime as dt
 from dataclasses import dataclass, field
 
+from . import rotation
 from .config import BELL_NAMES, ring_seconds
 from .turkish import capitalize_first, ordinal_word
 
@@ -133,7 +134,7 @@ def _bell(cfg, minute, kind, lesson, variant, note):
     text = capitalize_first(text)
     return BellEvent(
         minute=minute, kind=kind, lesson=lesson, variant=variant,
-        label=BELL_NAMES[kind], note=note, sound=b.get("sound", ""),
+        label=BELL_NAMES[kind], note=note, sound=rotation.effective_sound(b),
         text=text, tts=bool(b.get("tts")) and cfg["tts"].get("enabled", False),
         duration=ring_seconds(b.get("duration")), volume=int(b.get("volume", 100)),
     )

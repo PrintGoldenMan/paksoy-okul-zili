@@ -7,7 +7,7 @@ import threading
 import customtkinter as ctk
 from tkinter import filedialog, messagebox
 
-from .. import downloader, library, sounds
+from .. import downloader, library, rotation, sounds
 from ..config import BELL_NAMES, BELL_TYPES
 from . import theme
 from .widgets import Card, ask_safely, fit_to_screen
@@ -144,7 +144,16 @@ class LibraryWindow(ctk.CTkToplevel):
 
     def _bells_using(self, sound_id):
         cfg = self.app.cfg
-        names = [BELL_NAMES[k] for k in BELL_TYPES if cfg["bells"][k].get("sound") == sound_id]
+        names = []
+        for k in BELL_TYPES:
+            bell = cfg["bells"][k]
+            rot = bell.get("rotation") or {}
+            if rot.get("enabled") and sound_id in (rot.get("pool") or []):
+                period = rotation.PERIOD_THIS.get(rot.get("period"), "Bu dönemin").lower()
+                now = " – " + period + " sesi" if rotation.effective_sound(bell) == sound_id else ""
+                names.append(f"{BELL_NAMES[k]} (değişen ses{now})")
+            elif bell.get("sound") == sound_id:
+                names.append(BELL_NAMES[k])
         names += [e.get("label") or "Ek zil" for e in cfg.get("extra_bells", []) if e.get("sound") == sound_id]
         return names
 
@@ -231,6 +240,7 @@ class LibraryWindow(ctk.CTkToplevel):
             for e in cfg.get("extra_bells", []):
                 if e.get("sound") == sid:
                     e["sound"] = ""
+            rotation.remove_from_pools(cfg, sid)
             self.app.update_config()
         self.refresh()
 

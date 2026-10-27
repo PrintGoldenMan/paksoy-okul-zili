@@ -8,7 +8,7 @@ import sys
 
 import customtkinter as ctk
 
-from . import APP_NAME, __version__, autostart, config, paths
+from . import APP_NAME, __version__, autostart, config, paths, rotation, sounds
 from .audio import Player
 from .config import BELL_NAMES, ring_seconds
 from .scheduler import BellScheduler
@@ -42,10 +42,36 @@ class App:
         if autostart.supported():
             # Kurulum programı da otomatik başlatmayı açıp kapatabilir; kayıt defteri esas alınır.
             self.cfg["autostart"] = autostart.is_enabled()
+        if rotation.update_all(self.cfg):
+            self._save_quietly()
+        self._rotation_checked = None
         self.now_playing = ""
         self.player = Player(lambda: self.cfg, on_state=self._on_player_state)
         self.scheduler = BellScheduler(lambda: self.cfg, self.player)
         self.window = None
+
+    def _save_quietly(self):
+        try:
+            config.save(self.cfg)
+        except OSError as exc:
+            log.error("Ayarlar kaydedilemedi: %s", exc)
+
+    def check_rotation(self, now):
+        """Yeni gün/hafta/ay başladıysa değişen zil seslerinden yenisini seçer (ana ekran her saniye çağırır)."""
+        minute = now.replace(second=0, microsecond=0)
+        if minute == self._rotation_checked:
+            return
+        self._rotation_checked = minute
+        before = {k: rotation.effective_sound(b) for k, b in self.cfg["bells"].items()}
+        if rotation.update_all(self.cfg, now.date()):
+            self._save_quietly()
+            self.scheduler.reload()
+            for k, b in self.cfg["bells"].items():
+                after = rotation.effective_sound(b)
+                if after != before.get(k):
+                    log.info("Değişen ses: %s artık «%s»", BELL_NAMES[k], sounds.display_name(after))
+            if self.window is not None:
+                self.window.refresh_all()
 
     def _on_player_state(self, playing, text):
         self.now_playing = text if playing else ""
@@ -63,6 +89,7 @@ class App:
             for key in self.RUNTIME_KEYS:
                 new_cfg[key] = self.cfg.get(key, new_cfg.get(key))
         self.cfg = new_cfg
+        rotation.update_all(self.cfg)   # havuz değiştiyse ya da yeni açıldıysa bu dönemin sesini seç
         try:
             config.save(self.cfg)
         except OSError as exc:
@@ -81,7 +108,7 @@ class App:
     def ring_now(self, kind):
         b = self.cfg["bells"][kind]
         log.info("Elle çalındı: %s", BELL_NAMES[kind])
-        self.player.ring(BellEvent(minute=0, kind=kind, label=BELL_NAMES[kind], sound=b.get("sound", ""),
+        self.player.ring(BellEvent(minute=0, kind=kind, label=BELL_NAMES[kind], sound=rotation.effective_sound(b),
                                    duration=ring_seconds(b.get("duration")), volume=int(b.get("volume", 100))),
                          announce=False)
 

@@ -23,6 +23,10 @@ Okul zillerini ders programına göre otomatik çalan, Türkçe arayüzlü masa�
     `dk:sn`, `sa:dk:sn` ya da saniye) yalnızca o kısım kaydedilir. Site izin veriyorsa yalnızca o bölüm indirilir,
     böylece uzun videolarda da hızlıdır. Bölüm seçiminde baştaki sessizlik kırpılmaz; ses tam seçilen saniyeden başlar.
     Yalnızca tek ses bağlantılarında kullanılabilir, oynatma listelerinde kullanılamaz.
+  - **Değişen zil sesi (isteğe bağlı):** Ayarlar → Zil Sesleri'nde her zil için «🔀 Ses düzenli olarak değişsin»
+    açılır; sıklık (her gün / her hafta / her ay) ve kütüphaneden en az bir ses seçilir. Her yeni dönemde bu
+    seslerden bir öncekinden farklı biri rastgele seçilir ve dönem boyunca aynı kalır (program yeniden açılsa da).
+    Haftalar pazartesi, aylar ayın 1'inde değişir. «Şimdi değiştir» ile hemen yeni bir ses seçilebilir.
   - Hem şarkı hem liste içeren YouTube bağlantılarında (`watch?v=…&list=…`) yalnızca o şarkı indirilir.
   - Zil sesi seçilmemişse (ilk kurulumda olduğu gibi) zil sessiz kalmaz: Windows uyarı sesi çalar ve ana ekranda
     sarı uyarı görünür.
@@ -32,6 +36,8 @@ Okul zillerini ders programına göre otomatik çalan, Türkçe arayüzlü masa�
 | Ses Kütüphanesi | Oynatma listesi ikinci uyarısı (geri sayımlı) |
 |---|---|
 | ![Kütüphane](docs/kutuphane.png) | ![Oynatma listesi uyarısı](docs/oynatma_listesi_uyari.png) |
+
+![Değişen zil sesi](docs/degisen_ses.png)
 
 - **Türkçe sesli anons (isteğe bağlı):** Zilden sonra örneğin *«Sayın öğretmenlerimiz, üçüncü ders
   başlamıştır.»* gibi bir anons okunur. Metinler düzenlenebilir.
@@ -142,6 +148,7 @@ python -m unittest discover -s tests    # testleri çalıştırır
 | `okul_zili/scheduler.py` | Saati izler, zamanı gelen zili çalar |
 | `okul_zili/audio.py` | Zil ve anonsları sırayla çalar (pygame) |
 | `okul_zili/sounds.py` | Zil sesi kimliklerini kütüphanedeki dosyalara çevirir |
+| `okul_zili/rotation.py` | Değişen zil sesi (gün/hafta/ay için rastgele seçim) |
 | `okul_zili/library.py` | Ses kütüphanesi (kayıt listesi, kısa dosya adları) |
 | `okul_zili/downloader.py` | yt-dlp ile indirme, ffmpeg ile Opus'a dönüştürme, yt-dlp/Deno güncelleme |
 | `okul_zili/tts.py` | Türkçe sesli anons (edge-tts / pyttsx3) |

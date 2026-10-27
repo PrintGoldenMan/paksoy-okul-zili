@@ -44,6 +44,11 @@ BELL_TYPES = ["ogrenci", "ogretmen", "cikis"]
 BELL_NAMES = {"ogrenci": "Öğrenci Zili", "ogretmen": "Öğretmen Zili",
               "cikis": "Çıkış Zili", "ek": "Ek Zil"}
 
+def _rotation_default():
+    """Değişen zil sesi (rotation.py): kapalıyken zil «sound» ayarındaki sesi çalar."""
+    return {"enabled": False, "period": "week", "pool": [], "current": "", "key": ""}
+
+
 DEFAULTS = {
     "version": 1,
     "level": None,  # İlk açılışta kullanıcıya sorulur.
@@ -75,15 +80,18 @@ DEFAULTS = {
     "bells": {
         "ogrenci": {
             "sound": "", "duration": DEFAULT_RING_SECONDS, "volume": 100, "tts": True,
+            "rotation": _rotation_default(),
             "text": "Sevgili öğrenciler, {ders_sira} ders başlamak üzere. "
                     "Lütfen sınıflarınıza geçiniz.",
         },
         "ogretmen": {
             "sound": "", "duration": DEFAULT_RING_SECONDS, "volume": 100, "tts": True,
+            "rotation": _rotation_default(),
             "text": "Sayın öğretmenlerimiz, {ders_sira} ders başlamıştır.",
         },
         "cikis": {
             "sound": "", "duration": DEFAULT_RING_SECONDS, "volume": 100, "tts": True,
+            "rotation": _rotation_default(),
             "text": "{ders_sira} ders sona ermiştir. İyi teneffüsler.",
             "text_lunch": "Öğle arası başlamıştır. Afiyet olsun.",
             "text_last": "Bugünkü dersler sona ermiştir. İyi günler dileriz.",
