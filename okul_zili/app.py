@@ -10,7 +10,7 @@ import customtkinter as ctk
 
 from . import APP_NAME, __version__, autostart, config, paths, sounds
 from .audio import Player
-from .config import BELL_NAMES
+from .config import BELL_NAMES, ring_seconds
 from .scheduler import BellScheduler
 from .schedule import BellEvent
 
@@ -56,7 +56,7 @@ class App:
         b = self.cfg["bells"][kind]
         log.info("Elle çalındı: %s", BELL_NAMES[kind])
         self.player.ring(BellEvent(minute=0, kind=kind, label=BELL_NAMES[kind], sound=b.get("sound", ""),
-                                   repeat=max(1, int(b.get("repeat", 1))), volume=int(b.get("volume", 100))),
+                                   duration=ring_seconds(b.get("duration")), volume=int(b.get("volume", 100))),
                          announce=False)
 
     def run(self):

@@ -12,7 +12,7 @@ LEVELS = ["kolay", "basit", "gelismis", "uzman", "profesyonel"]
 LEVEL_NAMES = {"kolay": "Çok Kolay", "basit": "Basit", "gelismis": "Gelişmiş", "uzman": "Uzman",
                "profesyonel": "Profesyonel"}
 LEVEL_DESCRIPTIONS = {
-    "kolay": "Tek sayfa: ses düzeyi, sabah zillerini açma/kapatma ve otomatik başlatma. "
+    "kolay": "Tek sayfa: ses düzeyi, zil çalma süresi, sabah zillerini açma/kapatma ve otomatik başlatma. "
              "Ders saatleri okulun programına göre hazır gelir.",
     "basit": "Yalnızca gerekli ayarlar: ders başlangıcı, ders ve teneffüs süreleri, "
              "zil sesleri. Hızlı ve kolay kullanım için önerilir.",
@@ -23,6 +23,21 @@ LEVEL_DESCRIPTIONS = {
     "profesyonel": "Uzman düzeye ek olarak: her zili tek tek açıp kapatma, birden çok zil programı "
                    "(ör. kısaltılmış ders, sınav haftası) ve bunları belirli tarihlere atama, teknik ayarlar.",
 }
+
+# Zilin kaç saniye çalacağı. Ses daha kısaysa başa sarılarak tekrarlanır, daha uzunsa
+# süre dolunca yumuşakça kısılarak durdurulur.
+DEFAULT_RING_SECONDS = 3.5
+MIN_RING_SECONDS = 0.5
+MAX_RING_SECONDS = 30.0
+
+
+def ring_seconds(value) -> float:
+    try:
+        v = float(str(value).replace(",", "."))
+    except (TypeError, ValueError):
+        return DEFAULT_RING_SECONDS
+    return max(MIN_RING_SECONDS, min(MAX_RING_SECONDS, v))
+
 
 BELL_TYPES = ["ogrenci", "ogretmen", "cikis"]
 BELL_NAMES = {"ogrenci": "Öğrenci Zili", "ogretmen": "Öğretmen Zili",
@@ -58,16 +73,16 @@ DEFAULTS = {
     "day_overrides": {},
     "bells": {
         "ogrenci": {
-            "sound": "builtin:melodi", "repeat": 1, "volume": 100, "tts": True,
+            "sound": "builtin:melodi", "duration": DEFAULT_RING_SECONDS, "volume": 100, "tts": True,
             "text": "Sevgili öğrenciler, {ders_sira} ders başlamak üzere. "
                     "Lütfen sınıflarınıza geçiniz.",
         },
         "ogretmen": {
-            "sound": "builtin:klasik", "repeat": 1, "volume": 100, "tts": True,
+            "sound": "builtin:klasik", "duration": DEFAULT_RING_SECONDS, "volume": 100, "tts": True,
             "text": "Sayın öğretmenlerimiz, {ders_sira} ders başlamıştır.",
         },
         "cikis": {
-            "sound": "builtin:westminster", "repeat": 1, "volume": 100, "tts": True,
+            "sound": "builtin:kampana", "duration": DEFAULT_RING_SECONDS, "volume": 100, "tts": True,
             "text": "{ders_sira} ders sona ermiştir. İyi teneffüsler.",
             "text_lunch": "Öğle arası başlamıştır. Afiyet olsun.",
             "text_last": "Bugünkü dersler sona ermiştir. İyi günler dileriz.",
@@ -84,7 +99,7 @@ DEFAULTS = {
     # [{"start": "2026-10-29", "end": "2026-10-29", "name": "Cumhuriyet Bayramı"}]
     "holidays": [],
     # [{"enabled": true, "time": "08:25", "days": [0], "label": "İstiklal Marşı",
-    #   "sound": "builtin:gong", "text": ""}]
+    #   "sound": "builtin:gong", "text": "", "duration": 3.5}]
     "extra_bells": [],
     # Profesyonel düzey: kalıcı olarak kapatılan ziller, ör. {"all": ["cikis-8"], "4": ["ogrenci-6"]}
     # Kimlikler "tür-dersno" biçimindedir; böylece ders saatleri değişse de geçerli kalır.

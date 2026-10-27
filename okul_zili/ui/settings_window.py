@@ -19,7 +19,8 @@ import customtkinter as ctk
 from tkinter import filedialog, messagebox
 
 from .. import autostart, config, paths, schedule, sounds, tts
-from ..config import BELL_NAMES, BELL_TYPES, LEVEL_DESCRIPTIONS, LEVEL_NAMES, LEVELS
+from ..config import (BELL_NAMES, BELL_TYPES, DEFAULT_RING_SECONDS, LEVEL_DESCRIPTIONS, LEVEL_NAMES, LEVELS,
+                      MAX_RING_SECONDS, MIN_RING_SECONDS, ring_seconds)
 from ..schedule import fmt_hm, parse_hm
 from ..turkish import DAYS, capitalize_first, ordinal_word
 from . import theme
@@ -34,15 +35,18 @@ CHOOSE_FILE = "Dosya seç…"
 class SoundPicker(ctk.CTkFrame):
     """Hazır ses / kendi dosyası seçimi ve dinleme düğmesi."""
 
-    def __init__(self, master, player, sound_id, allow_files, allow_none=True):
+    def __init__(self, master, player, sound_id, allow_files, allow_none=True, duration_spin=None):
         super().__init__(master, fg_color="transparent")
         self.player = player
+        self.duration_spin = duration_spin
         self.sound_id = sound_id or "builtin:klasik"
         self.allow_files = allow_files
         self.allow_none = allow_none
         self.menu = ctk.CTkOptionMenu(self, width=250, command=self._on_select, dynamic_resizing=False)
         self.menu.pack(side="left")
         ctk.CTkButton(self, text="▶ Dinle", width=80, command=self._preview).pack(side="left", padx=(8, 0))
+        self.length_lbl = ctk.CTkLabel(self, text="", text_color=theme.MUTED, font=theme.font(12))
+        self.length_lbl.pack(side="left", padx=(8, 0))
         self._refresh()
 
     def _choices(self):
@@ -58,6 +62,12 @@ class SoundPicker(ctk.CTkFrame):
         values = [name for _, name in opts] + ([CHOOSE_FILE] if self.allow_files else [])
         self.menu.configure(values=values)
         self.menu.set(sounds.display_name(self.sound_id))
+        self._show_length()
+
+    def _show_length(self):
+        n = sounds.length_seconds(self.sound_id)
+        text = f"(sesin kendi uzunluğu {n:.1f} sn)".replace(".", ",") if n else ""
+        self.length_lbl.configure(text=text)
 
     def _on_select(self, name):
         if name == CHOOSE_FILE:
@@ -71,10 +81,17 @@ class SoundPicker(ctk.CTkFrame):
         for sid, n in self._choices():
             if n == name:
                 self.sound_id = sid
+                self._show_length()
                 return
 
     def _preview(self):
-        self.player.preview_sound(self.sound_id)
+        duration = None
+        if self.duration_spin is not None:
+            try:
+                duration = self.duration_spin.get()
+            except ValueError:
+                duration = None
+        self.player.preview_sound(self.sound_id, duration)
 
     def get(self):
         return self.sound_id
@@ -306,9 +323,16 @@ class SettingsWindow(ctk.CTkToplevel):
         vol.set(cfg["master_volume"])
         labeled_row(b, 0, "Zil ses düzeyi", vol)
         vol_lbl.grid(row=0, column=2, padx=8)
-        ctk.CTkButton(b, text="▶ Sesi dene", width=110,
-                      command=lambda: self.app.player.preview_sound(cfg["bells"]["ogretmen"]["sound"])).grid(
-            row=0, column=3, padx=8)
+        dur = duration_spin(b, cfg["bells"]["ogretmen"].get("duration"))
+        labeled_row(b, 1, "Zil çalma süresi", dur, "Üç zil için de geçerlidir")
+
+        def try_sound():
+            try:
+                d = dur.get()
+            except ValueError:
+                d = None
+            self.app.player.preview_sound(cfg["bells"]["ogretmen"]["sound"], d)
+        ctk.CTkButton(b, text="▶ Sesi dene", width=110, command=try_sound).grid(row=0, column=3, padx=8)
 
         self._morning_card(f)
 
@@ -324,6 +348,12 @@ class SettingsWindow(ctk.CTkToplevel):
         def collect():
             cfg["master_volume"] = int(vol.get())
             cfg["autostart"] = bool(auto_var.get())
+            try:
+                seconds = dur.get()
+            except ValueError as exc:
+                raise ValueError(f"Zil çalma süresi: {exc}")
+            for kind in BELL_TYPES:
+                cfg["bells"][kind]["duration"] = seconds
         self._collectors.append(collect)
 
     def _tab_general(self, f):
@@ -496,33 +526,38 @@ class SettingsWindow(ctk.CTkToplevel):
             b = self._card(f, BELL_NAMES[kind], sub)
             ctk.CTkFrame(b, width=6, height=30, corner_radius=3, fg_color=theme.BELL_COLORS[kind]).grid(
                 row=0, column=0, rowspan=3, sticky="ns", padx=(0, 10))
-            picker = SoundPicker(b, self.app.player, bell["sound"], allow_files=self._at_least("gelismis"))
+            opt = ctk.CTkFrame(b, fg_color="transparent")
+            opt.grid(row=1, column=1, sticky="w", pady=(8, 0))
+            ctk.CTkLabel(opt, text="Çalma süresi:").pack(side="left")
+            dur = duration_spin(opt, bell.get("duration"))
+            dur.pack(side="left", padx=(6, 20))
+            picker = SoundPicker(b, self.app.player, bell["sound"], allow_files=self._at_least("gelismis"),
+                                 duration_spin=dur)
             picker.grid(row=0, column=1, sticky="w")
-            widgets = {"picker": picker}
+            widgets = {"picker": picker, "duration": dur}
             if self._at_least("uzman"):
-                opt = ctk.CTkFrame(b, fg_color="transparent")
-                opt.grid(row=1, column=1, sticky="w", pady=(8, 0))
-                ctk.CTkLabel(opt, text="Kaç kez çalsın:").pack(side="left")
-                rep = Spin(opt, bell.get("repeat", 1), 1, 5)
-                rep.pack(side="left", padx=(6, 20))
                 ctk.CTkLabel(opt, text="Bu zilin ses düzeyi:").pack(side="left")
                 v = ctk.CTkSlider(opt, from_=10, to=100, number_of_steps=18, width=180)
                 v.set(bell.get("volume", 100))
                 v.pack(side="left", padx=6)
-                widgets.update(repeat=rep, volume=v)
+                widgets.update(volume=v)
             pickers[kind] = widgets
-        self._hint(f, "İpucu: Öğrenci ve öğretmen zillerine farklı sesler seçerseniz kimin sınıfa "
+        self._hint(f, f"Çalma süresi {_sec(MIN_RING_SECONDS)}–{_sec(MAX_RING_SECONDS)} saniye arasında olabilir "
+                      f"(varsayılan {_sec(DEFAULT_RING_SECONDS)}). Ses bu süreden kısaysa başa sarılarak tekrarlanır, "
+                      "uzunsa süre dolunca yumuşakça kısılarak durur. Anons, zil bittikten sonra okunur.\n"
+                      "İpucu: Öğrenci ve öğretmen zillerine farklı sesler seçerseniz kimin sınıfa "
                       "gireceği kolayca anlaşılır.")
 
         def collect():
             cfg["master_volume"] = int(vol.get())
             for kind, w in pickers.items():
                 cfg["bells"][kind]["sound"] = w["picker"].get()
-                if "repeat" in w:
-                    try:
-                        cfg["bells"][kind]["repeat"] = w["repeat"].get()
-                    except ValueError as exc:
-                        raise ValueError(f"{BELL_NAMES[kind]} tekrar sayısı: {exc}")
+                try:
+                    cfg["bells"][kind]["duration"] = w["duration"].get()
+                except ValueError as exc:
+                    raise ValueError(f"{BELL_NAMES[kind]} çalma süresi: {exc}")
+                cfg["bells"][kind].pop("repeat", None)
+                if "volume" in w:
                     cfg["bells"][kind]["volume"] = int(w["volume"].get())
         self._collectors.append(collect)
 
@@ -778,7 +813,7 @@ class SettingsWindow(ctk.CTkToplevel):
 
         def add(e=None):
             e = e or {"enabled": True, "time": "08:20", "days": [0], "label": "Yeni zil",
-                      "sound": "builtin:gong", "text": "", "repeat": 1}
+                      "sound": "builtin:gong", "text": "", "duration": DEFAULT_RING_SECONDS}
             card = ctk.CTkFrame(holder, fg_color=theme.CARD_BG, corner_radius=12)
             card.grid(row=len(items), column=0, sticky="ew", pady=5, padx=4)
             line1 = ctk.CTkFrame(card, fg_color="transparent")
@@ -799,13 +834,18 @@ class SettingsWindow(ctk.CTkToplevel):
                 day_vars.append(v)
             line2 = ctk.CTkFrame(card, fg_color="transparent")
             line2.pack(fill="x", padx=12, pady=(0, 10))
-            picker = SoundPicker(line2, self.app.player, e.get("sound", "builtin:gong"), allow_files=True)
+            dur = duration_spin(line2, e.get("duration"))
+            picker = SoundPicker(line2, self.app.player, e.get("sound", "builtin:gong"), allow_files=True,
+                                 duration_spin=dur)
+            picker.length_lbl.pack_forget()
             picker.pack(side="left")
-            text = ctk.CTkEntry(line2, width=300, placeholder_text="Anons metni (isteğe bağlı)")
+            ctk.CTkLabel(line2, text="Süre").pack(side="left", padx=(10, 4))
+            dur.pack(side="left")
+            text = ctk.CTkEntry(line2, width=230, placeholder_text="Anons metni (isteğe bağlı)")
             text.insert(0, e.get("text", ""))
             text.pack(side="left", padx=8)
             item = {"card": card, "en": en, "label": label, "time": tm, "days": day_vars, "picker": picker,
-                    "text": text, "repeat": e.get("repeat", 1)}
+                    "text": text, "duration": dur}
 
             def remove():
                 card.destroy()
@@ -841,11 +881,15 @@ class SettingsWindow(ctk.CTkToplevel):
                 except ValueError:
                     raise ValueError(f"Ek Ziller: «{name}» için saat SS:DD biçiminde olmalı (ör. 08:20).")
                 days = [i for i, v in enumerate(it["days"]) if v.get()]
+                try:
+                    seconds = it["duration"].get()
+                except ValueError as exc:
+                    raise ValueError(f"Ek Ziller: «{name}» çalma süresi: {exc}")
                 if not days:
                     raise ValueError(f"Ek Ziller: «{name}» için en az bir gün seçin.")
                 out.append({"enabled": bool(it["en"].get()), "time": tm, "days": days, "label": name,
                             "sound": it["picker"].get(), "text": it["text"].get().strip(),
-                            "repeat": it["repeat"]})
+                            "duration": seconds})
             cfg["extra_bells"] = out
         self._collectors.append(collect)
 
@@ -1135,6 +1179,16 @@ class SettingsWindow(ctk.CTkToplevel):
     def _cancel(self):
         self.app.player.stop()
         self.destroy()
+
+
+def _sec(v) -> str:
+    return f"{v:g}".replace(".", ",")
+
+
+def duration_spin(master, value):
+    """Zil çalma süresi kutusu (saniye, yarım saniyelik adımlarla)."""
+    return Spin(master, ring_seconds(value if value is not None else DEFAULT_RING_SECONDS),
+                MIN_RING_SECONDS, MAX_RING_SECONDS, suffix="saniye", step=0.5, decimals=1)
 
 
 def _open_path(path):

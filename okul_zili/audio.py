@@ -41,9 +41,10 @@ class Player:
         """Bir zil olayını (schedule.BellEvent) kuyruğa ekler."""
         self._queue.put(("event", event, announce))
 
-    def preview_sound(self, sound_id: str, volume: int = 100) -> None:
+    def preview_sound(self, sound_id: str, duration=None) -> None:
+        """Sesi dinletir; süre verilirse zil gerçekte ne kadar çalacaksa o kadar çalar."""
         self.stop()
-        self._queue.put(("sound", sound_id, volume))
+        self._queue.put(("sound", sound_id, duration))
 
     def say(self, text: str, tts_cfg=None) -> None:
         """Metni okur. tts_cfg verilirse kayıtlı anons ayarları yerine o kullanılır (deneme için)."""
@@ -75,7 +76,7 @@ class Player:
                     self._play_event(cfg, a, b)
                 elif kind == "sound":
                     self._set_state(True, sounds.display_name(a))
-                    self._play_file(sounds.resolve(a), cfg["master_volume"] * b / 100)
+                    self._play_file(sounds.resolve(a), cfg["master_volume"], duration=b)
                 elif kind == "say":
                     self._set_state(True, "Anons")
                     self._announce(cfg if b is None else dict(cfg, tts=b), a)
@@ -95,10 +96,9 @@ class Player:
         self._set_state(True, event.label)
         volume = cfg["master_volume"] * event.volume / 100
         path = sounds.resolve(event.sound)
-        for _ in range(event.repeat):
-            if self._stop.is_set():
-                return
-            self._play_file(path, volume)
+        self._play_file(path, volume, duration=event.duration)
+        if self._stop.is_set():
+            return
         if announce and event.tts and event.text and not self._stop.is_set():
             if path:
                 time.sleep(cfg["tts"].get("pause_ms", 400) / 1000)
@@ -112,7 +112,9 @@ class Player:
         volume = cfg["master_volume"] * cfg["tts"].get("volume", 100) / 100
         self._play_file(path, volume)
 
-    def _play_file(self, path, volume):
+    def _play_file(self, path, volume, duration=None):
+        """Dosyayı çalar. duration (saniye) verilirse ses o süre boyunca çalar:
+        kısa sesler başa sarılarak tekrarlanır, uzun sesler sonunda yumuşakça kısılır."""
         if path is None or self._stop.is_set():
             return
         if not _HAVE_PYGAME:
@@ -120,11 +122,25 @@ class Player:
             return
         pygame.mixer.music.load(str(path))
         pygame.mixer.music.set_volume(max(0.0, min(1.0, volume / 100)))
-        pygame.mixer.music.play()
+        if duration:
+            pygame.mixer.music.play(loops=-1)
+            end = time.monotonic() + duration
+            fade_s = min(0.5, duration * 0.2)
+        else:
+            pygame.mixer.music.play()
+            end = None
         while pygame.mixer.music.get_busy():
-            if self._stop.wait(0.05):
+            if self._stop.wait(0.02):
                 pygame.mixer.music.stop()
                 break
+            if end is not None:
+                left = end - time.monotonic()
+                if left <= 0:
+                    pygame.mixer.music.stop()   # süre doldu: kesin olarak dur
+                    break
+                if left <= fade_s:
+                    # Sonda sesi elle kısarak yumuşak bitiş (fadeout süresi her sistemde kesin değil)
+                    pygame.mixer.music.set_volume(max(0.0, min(1.0, volume / 100)) * left / fade_s)
         try:
             pygame.mixer.music.unload()
         except Exception:  # noqa: BLE001

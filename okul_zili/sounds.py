@@ -210,6 +210,21 @@ def resolve(sound_id: str):
     return builtin_path("klasik")
 
 
+def length_seconds(sound_id: str):
+    """Ses dosyasının kendi uzunluğu (saniye); bilinmiyorsa None."""
+    path = resolve(sound_id)
+    if path is None:
+        return None
+    try:
+        if str(path).lower().endswith(".wav"):
+            with wave.open(str(path)) as w:
+                return w.getnframes() / float(w.getframerate())
+        import pygame
+        return pygame.mixer.Sound(str(path)).get_length()
+    except Exception:  # noqa: BLE001 - okunamayan dosya
+        return None
+
+
 def display_name(sound_id: str) -> str:
     if not sound_id or sound_id == NO_SOUND:
         return NO_SOUND_NAME

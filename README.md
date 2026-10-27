@@ -15,6 +15,9 @@ Okul zillerini ders programına göre otomatik çalan, Türkçe arayüzlü masa�
 - **Türkçe sesli anons (isteğe bağlı):** Zilden sonra örneğin *«Sayın öğretmenlerimiz, üçüncü ders
   başlamıştır.»* gibi bir anons okunur. Metinler düzenlenebilir.
 - **Beş ayar düzeyi:** **Çok Kolay → Basit → Gelişmiş → Uzman → Profesyonel**
+- **Zil çalma süresi:** Her zilin kaç saniye çalacağı ayarlanır (varsayılan **3,5 sn**, en az 0,5, en çok **30 sn**).
+  Ses bu süreden kısaysa başa sarılarak tekrarlanır, uzunsa süre dolunca yumuşakça kısılarak durur.
+  Anons, zil bittikten sonra okunur.
 - **Sabah zilleri kapatılabilir:** 08:28 öğrenci zili ve 08:30 öğretmen zili ayrı ayrı açılıp kapatılabilir
   (her düzeyde, Ayarlar → Sabah Zilleri).
 - **Zilleri tek tek kapatma:** Ana ekrandaki «Kapat» düğmesiyle herhangi bir zil yalnızca bugün için
@@ -28,10 +31,10 @@ Okul zillerini ders programına göre otomatik çalan, Türkçe arayüzlü masa�
 
 | Düzey | Görünen ayarlar |
 |---|---|
-| **Çok Kolay** | Tek sayfa: ses düzeyi, sabah zillerini (08:28 / 08:30) açma-kapatma, otomatik başlatma |
-| **Basit** | Okul adı, tema, ilk ders saati, ders, teneffüs ve öğle arası süreleri, öğrenci zilinin kaç dakika önce çalacağı, hazır zil sesleri, ses düzeyi |
+| **Çok Kolay** | Tek sayfa: ses düzeyi, zil çalma süresi (üç zil için tek ayar), sabah zillerini (08:28 / 08:30) açma-kapatma, otomatik başlatma |
+| **Basit** | Okul adı, tema, ilk ders saati, ders, teneffüs ve öğle arası süreleri, öğrenci zilinin kaç dakika önce çalacağı, hazır zil sesleri, her zilin çalma süresi, ses düzeyi |
 | **Gelişmiş** | Basit düzeydekilere ek olarak: ders saatlerini tek tek girme, kendi ses dosyalarınız (MP3/WAV/OGG), okul günleri, tatiller (resmî tatilleri tek tıkla ekleme), Türkçe sesli anonslar ve metinleri |
-| **Uzman** | Gelişmiş düzeydekilere ek olarak: güne özel ders saatleri (ör. Cuma erken çıkış), ek ziller (bayrak töreni vb.), zil tekrar sayısı ve zile özel ses düzeyi, anons motoru, hızı ve ses düzeyi, ayarları yedekleme/geri yükleme, kayıtlar |
+| **Uzman** | Gelişmiş düzeydekilere ek olarak: güne özel ders saatleri (ör. Cuma erken çıkış), ek ziller (bayrak töreni vb.), ek zillerin çalma süresi, zile özel ses düzeyi, anons motoru, hızı ve ses düzeyi, ayarları yedekleme/geri yükleme, kayıtlar |
 | **Profesyonel** | Uzman düzeydekilere ek olarak: **Zil Listesi** (günün her zilini tek tek, her gün için ya da belirli bir gün için kapatma), **Zil Programları** (ör. «Kısaltılmış Ders», «Sınav Haftası» programlarını kaydetme, her gün kullanma veya belirli tarihlere atama), teknik ayarlar |
 
 Düzey yalnızca **neyin görüneceğini** belirler. Üst düzeyde yapılan ayarlar düzey düşürülse de geçerli kalır.
@@ -40,6 +43,10 @@ Kapatılan ziller ana ekranda gri ve «Kapalı» olarak görünmeye devam eder.
 | Çok Kolay | Profesyonel – Zil Listesi |
 |---|---|
 | ![Çok Kolay](docs/ayarlar_cok_kolay.png) | ![Zil Listesi](docs/ayarlar_zil_listesi.png) |
+
+| Zil Sesleri ve çalma süresi | Profesyonel – Zil Programları |
+|---|---|
+| ![Zil Sesleri](docs/ayarlar_zil_sesleri.png) | ![Programlar](docs/ayarlar_programlar.png) |
 
 ## Varsayılan zil çizelgesi
 

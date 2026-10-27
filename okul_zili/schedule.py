@@ -3,7 +3,7 @@
 import datetime as dt
 from dataclasses import dataclass, field
 
-from .config import BELL_NAMES
+from .config import BELL_NAMES, ring_seconds
 from .turkish import capitalize_first, ordinal_word
 
 
@@ -32,7 +32,7 @@ class BellEvent:
     sound: str = ""
     text: str = ""       # anons metni (yer tutucular doldurulmuş)
     tts: bool = False
-    repeat: int = 1
+    duration: float = 3.5  # zilin çalma süresi (saniye)
     volume: int = 100
     extra: dict = field(default_factory=dict)
     off: str = ""        # boş değilse zil çalmaz: "Kapalı" veya "Bugün kapalı"
@@ -134,7 +134,7 @@ def _bell(cfg, minute, kind, lesson, variant, note):
         minute=minute, kind=kind, lesson=lesson, variant=variant,
         label=BELL_NAMES[kind], note=note, sound=b.get("sound", ""),
         text=text, tts=bool(b.get("tts")) and cfg["tts"].get("enabled", False),
-        repeat=max(1, int(b.get("repeat", 1))), volume=int(b.get("volume", 100)),
+        duration=ring_seconds(b.get("duration")), volume=int(b.get("volume", 100)),
     )
 
 
@@ -185,7 +185,7 @@ def extra_events(cfg: dict, weekday: int) -> list:
             minute=minute, kind="ek", label=e.get("label") or "Ek Zil", note="Ek zil",
             sound=e.get("sound", "builtin:gong"), text=text,
             tts=bool(text) and cfg["tts"].get("enabled", False),
-            repeat=max(1, int(e.get("repeat", 1))), volume=int(e.get("volume", 100)), extra=e,
+            duration=ring_seconds(e.get("duration")), volume=int(e.get("volume", 100)), extra=e,
         ))
     return out
 

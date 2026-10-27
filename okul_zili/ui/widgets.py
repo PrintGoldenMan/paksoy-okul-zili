@@ -46,27 +46,41 @@ def labeled_row(parent, row, label, widget, hint=None):
 
 
 class Spin(ctk.CTkFrame):
-    """Artır/azalt düğmeli sayı kutusu. .get() tam sayı döndürür."""
+    """Artır/azalt düğmeli sayı kutusu. .get() tam sayı (decimals=0) veya ondalıklı sayı döndürür.
+    Ondalıklı değerler Türkçe biçimde virgülle gösterilir (ör. 3,5); nokta da kabul edilir."""
 
-    def __init__(self, master, value, minimum, maximum, suffix=""):
+    def __init__(self, master, value, minimum, maximum, suffix="", step=1, decimals=0):
         super().__init__(master, fg_color="transparent")
         self.minimum, self.maximum, self.suffix = minimum, maximum, suffix
-        self.var = ctk.StringVar(value=str(value))
+        self.step, self.decimals = step, decimals
+        self.var = ctk.StringVar(value=self._fmt(value))
         ctk.CTkButton(self, text="−", width=32, command=lambda: self._step(-1)).pack(side="left")
         ctk.CTkEntry(self, textvariable=self.var, width=56, justify="center").pack(side="left", padx=4)
         ctk.CTkButton(self, text="+", width=32, command=lambda: self._step(1)).pack(side="left")
         if suffix:
             ctk.CTkLabel(self, text=suffix).pack(side="left", padx=(6, 0))
 
+    def _fmt(self, v):
+        if not self.decimals:
+            return str(int(round(float(v))))
+        return f"{float(v):.{self.decimals}f}".rstrip("0").rstrip(".").replace(".", ",")
+
+    def _parse(self):
+        text = self.var.get().strip().replace(",", ".")
+        return float(text) if self.decimals else int(text)
+
     def _step(self, d):
         try:
-            v = int(self.var.get())
+            v = self._parse()
         except ValueError:
             v = self.minimum
-        self.var.set(str(max(self.minimum, min(self.maximum, v + d))))
+        self.var.set(self._fmt(max(self.minimum, min(self.maximum, v + d * self.step))))
 
-    def get(self) -> int:
-        v = int(self.var.get())
+    def get(self):
+        try:
+            v = self._parse()
+        except ValueError:
+            raise ValueError(f"«{self.var.get()}» geçerli bir sayı değil")
         if not self.minimum <= v <= self.maximum:
-            raise ValueError(f"{self.minimum} ile {self.maximum} arasında olmalı")
+            raise ValueError(f"{self._fmt(self.minimum)} ile {self._fmt(self.maximum)} arasında olmalı")
         return v
