@@ -319,8 +319,14 @@ class MainWindow(ctk.CTk):
         card.body.grid_columnconfigure(9, weight=0)
 
     def _build_statusbar(self):
-        self.statusbar = ctk.CTkLabel(self, text="", anchor="w", text_color=theme.MUTED, font=theme.font(12))
-        self.statusbar.grid(row=3, column=0, columnspan=2, sticky="ew", padx=20, pady=(0, 8))
+        bar = ctk.CTkFrame(self, fg_color="transparent")
+        bar.grid(row=3, column=0, columnspan=2, sticky="ew", padx=(20, 12), pady=(0, 6))
+        bar.grid_columnconfigure(0, weight=1)
+        self.statusbar = ctk.CTkLabel(bar, text="", anchor="w", text_color=theme.MUTED, font=theme.font(12))
+        self.statusbar.grid(row=0, column=0, sticky="ew")
+        ctk.CTkButton(bar, text="ⓘ  Hakkında", width=96, height=24, font=theme.font(12), fg_color="transparent",
+                      hover_color=theme.ROW_ALT, text_color=theme.MUTED,
+                      command=self.open_credits).grid(row=0, column=1, sticky="e")
 
     # -- güncelleme ---------------------------------------------------------
 
@@ -587,6 +593,13 @@ class MainWindow(ctk.CTk):
     def open_level_dialog(self):
         LevelDialog(self, self.app.cfg.get("level"), on_select=lambda lv: self.app.update_config(level=lv))
 
+    def open_credits(self):
+        from .credits import CreditsDialog
+        if getattr(self, "_credits", None) is not None and self._credits.winfo_exists():
+            self._credits.lift()
+            return
+        self._credits = CreditsDialog(self)
+
     def open_short_day(self):
         from .short_day import ShortDayDialog
         if not schedule.is_school_day(self.app.cfg, dt.date.today()):
@@ -634,6 +647,9 @@ class MainWindow(ctk.CTk):
                     cmd = tray.commands.get_nowait()
                     if cmd == "show":
                         self.show_window()
+                    elif cmd == "about":
+                        self.show_window()
+                        self.open_credits()
                     elif cmd == "silence":
                         self.app.player.stop()
                     elif cmd == "quit":

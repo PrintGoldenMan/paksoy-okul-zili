@@ -35,7 +35,7 @@ Oynatma listesi bağlantısı yapıştırılırsa program iki kez uyarır.
 - **Bugün kısaltılmış ders** düğmesi: yalnızca bugün için ders süreleri kısalır, yarın normale döner.
 - **MEB takvimi internetten:** Yeni eğitim yılının takvimi açıklanınca tatiller kendiliğinden güncellenir.
 - **Ders saatlerini paylaşma:** Ders saatleri dosyaya kaydedilip başka okula verilebilir; kurulumda yüklenebilir.
-- «Sorun bildir» bağlantısı, MIT lisansı.
+- «Hakkında» penceresi (geliştirici: GoldenMan0_0 · @PrintGoldenMan), «Sorun bildir» bağlantısı, MIT lisansı.
 
 ### 1.2.0
 - Pencere kapatılınca program saatin yanındaki simgede çalışmaya devam eder; beklenmedik kapanmada kendiliğinden açılır.

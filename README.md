@@ -197,6 +197,12 @@ Yeni eğitim yılının takvimi açıklanınca [`takvim/meb_takvim.json`](takvim
 ekleyin (aynı biçimde: `"2027-2028": {"holidays": [...]}`); programlar bir hafta içinde indirir.
 Yarım günlük tatillerde `"from": "13:00"` gibi zillerin susacağı saat yazılır.
 
+## Geliştirici
+
+<img src="assets/gelistirici.png" width="72" alt="PrintGoldenMan"> **GoldenMan0_0** · [@PrintGoldenMan](https://github.com/PrintGoldenMan)
+
+Programda: ana ekranın sağ alt köşesindeki **ⓘ Hakkında**, Ayarlar → Genel → Yardım ya da tepsi menüsü.
+
 ## Lisans
 
 [MIT](LICENSE) – ücretsiz kullanılabilir, değiştirilebilir ve dağıtılabilir.

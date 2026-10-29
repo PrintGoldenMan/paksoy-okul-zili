@@ -793,9 +793,15 @@ class SettingsWindow(ctk.CTkToplevel):
         row.grid(row=0, column=0, sticky="w")
         ctk.CTkButton(row, text="Sorun bildir / öneri gönder", width=200, fg_color="transparent", border_width=1,
                       text_color=theme.TEXT, command=lambda: webbrowser.open(ISSUES_URL)).pack(side="left")
+        ctk.CTkButton(row, text="Hakkında", width=110, fg_color="transparent", border_width=1, text_color=theme.TEXT,
+                      command=self._open_credits).pack(side="left", padx=(8, 0))
         if wizard:
             ctk.CTkButton(row, text="Kurulum sihirbazını yeniden aç", width=220, fg_color="transparent",
                           border_width=1, text_color=theme.TEXT, command=self._rerun_wizard).pack(side="left", padx=8)
+
+    def _open_credits(self):
+        from .credits import CreditsDialog
+        CreditsDialog(self)
 
     def _rerun_wizard(self):
         if not messagebox.askyesno("Kurulum sihirbazı", "Kurulum sihirbazı okul türüne göre ders saatlerini yeniden "

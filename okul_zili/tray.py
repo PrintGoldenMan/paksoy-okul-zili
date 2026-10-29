@@ -16,7 +16,7 @@ log = logging.getLogger(__name__)
 
 class Tray:
     def __init__(self):
-        self.commands = queue.Queue()   # tepsi iş parçacığından ana pencereye: "show", "silence", "quit"
+        self.commands = queue.Queue()   # tepsi iş parçacığından ana pencereye: "show", "silence", "about", "quit"
         self.icon = None
         self.available = False
         try:
@@ -26,6 +26,7 @@ class Tray:
             menu = pystray.Menu(
                 pystray.MenuItem("Okul Zili'ni göster", lambda: self.commands.put("show"), default=True),
                 pystray.MenuItem("Çalan zili sustur", lambda: self.commands.put("silence")),
+                pystray.MenuItem("Hakkında", lambda: self.commands.put("about")),
                 pystray.Menu.SEPARATOR,
                 pystray.MenuItem("Programı kapat (ziller çalmaz)", lambda: self.commands.put("quit")),
             )
