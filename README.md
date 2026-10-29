@@ -1,11 +1,24 @@
-# Okul Zili – Abdulkadir Paksoy Anadolu Lisesi
+# Okul Zili
 
-Okul zillerini ders programına göre otomatik çalan, Türkçe arayüzlü masaüstü programı.
+Okul zillerini ders programına göre otomatik çalan, Türkçe arayüzlü, ücretsiz ve açık kaynaklı Windows programı.
+İlkokul, ortaokul, lise ve anaokulları için; tekli ve **ikili öğretim** (sabahçı / öğlenci) desteklenir.
+MEB çalışma takvimi her yıl kendiliğinden güncellenir.
+
+**İndir:** [Sürümler (Releases)](../../releases/latest) → `OkulZili-Kurulum-….exe` ·
+**Sorun / öneri:** [GitHub Issues](../../issues/new)
 
 ![Ana ekran](docs/ana_ekran.png)
 
 ## Özellikler
 
+- **Kurulum sihirbazı:** İlk açılışta okulun adı, türü (İlkokul / Ortaokul / Lise / Anaokulu), tekli ya da ikili
+  öğretim ve ders saatleri sorulur; ders saatleri okul türüne göre önceden doldurulur.
+- **İkili öğretim:** Sabahçı ve öğlenci gruplarının kendi ders saatleri olur; iki grubun zilleri aynı gün art arda
+  çalar, ana ekranda hangi grubun hangi dersinin sürdüğü görünür.
+- **Bugün kısaltılmış ders:** Ana ekrandaki düğmeyle yalnızca bugün için ders süresi kısaltılır (ör. 30 dk);
+  yarın ders saatleri kendiliğinden normale döner.
+- **Ders saatlerini paylaşma:** Ders saatleri küçük bir dosyaya kaydedilip başka bir okula verilebilir
+  («Şablon dosyası yükle»).
 - **Otomatik ziller:** Her ders için üç zil çalar:
   - **Öğrenci Zili:** Teneffüs bitmeden 2 dakika önce (süre ayarlanabilir). Öğrenciler sınıfa girer.
   - **Öğretmen Zili:** Ders başladığında. Öğretmenler sınıfa girer.
@@ -53,7 +66,7 @@ Okul zillerini ders programına göre otomatik çalan, Türkçe arayüzlü masa�
 - **Güvenlik:** Ziller kapatıldığında ekranın üstünde kırmızı «ZİLLER KAPALI» uyarısı ve tek tıkla
   açma düğmesi görünür. Zilleri kapatmak, elle zil çalmak ve programı kapatmak onay ister.
   Program iki kez açılamaz (ziller iki kez çalmaz). Ses aygıtı sonradan bağlanırsa ses kendiliğinden düzelir;
-  bozuk bir ses dosyasında klasik zil çalar.
+  bozuk ya da silinmiş bir ses dosyasında Windows uyarı sesi çalar.
 - **Sistem tepsisi:** Pencere kapatılınca program kapanmaz, saatin yanındaki zil simgesinde çalışmaya devam eder.
   Tamamen kapatmak için simgeye sağ tıklayıp «Programı kapat» seçilir (Ayarlar → Genel'den kapatılabilir).
 - **Kendiliğinden yeniden açılma:** Program beklenmedik şekilde kapanırsa Windows Görev Zamanlayıcı onu 5 dakika
@@ -65,6 +78,8 @@ Okul zillerini ders programına göre otomatik çalan, Türkçe arayüzlü masa�
   sessizce kurar ve programı yeniden açar.
 - **Tam yedek:** Ayarlar ve bütün sesler tek bir .zip dosyasına; yeni bilgisayarda tek tıkla geri yüklenir.
 - **MEB çalışma takvimi:** Ara tatiller, yarıyıl, bayramlar, 28 Ekim öğleden sonra ve yaz tatili tek tıkla eklenir.
+  Takvim bu depodaki [`takvim/meb_takvim.json`](takvim/meb_takvim.json) dosyasından haftada bir indirilir; yeni eğitim
+  yılının takvimi açıklanınca okulların tatilleri kendiliğinden güncellenir (okulun elle girdiği tatillere dokunulmaz).
   Yarım günlük tatiller desteklenir (belirtilen saatten sonraki ziller çalmaz).
 - **Çalınacak bölüm:** Kütüphanede her ses için zilde çalınacak bölüm seçilir (ör. nakarat 1:05–1:20).
   Ek ziller «sonuna kadar çal» seçeneğiyle İstiklal Marşı gibi uzun sesleri tam çalabilir.
@@ -77,7 +92,7 @@ Okul zillerini ders programına göre otomatik çalan, Türkçe arayüzlü masa�
 | Düzey | Görünen ayarlar |
 |---|---|
 | **Çok Kolay** | Tek sayfa: ses düzeyi, zil çalma süresi (üç zil için tek ayar), sabah zillerini (08:28 / 08:30) açma-kapatma, otomatik başlatma |
-| **Basit** | Okul adı, tema, ilk ders saati, ders, teneffüs ve öğle arası süreleri, öğrenci zilinin kaç dakika önce çalacağı, hazır zil sesleri, her zilin çalma süresi, ses düzeyi |
+| **Basit** | Okul adı, tema, ilk ders saati, ders, teneffüs ve öğle arası süreleri, ikili öğretim, öğrenci zilinin kaç dakika önce çalacağı, kütüphaneden zil sesleri, her zilin çalma süresi, ses düzeyi, tam yedek |
 | **Gelişmiş** | Basit düzeydekilere ek olarak: ders saatlerini tek tek girme, kendi ses dosyalarınız (MP3/WAV/OGG), okul günleri, tatiller (resmî tatilleri tek tıkla ekleme), Türkçe sesli anonslar ve metinleri |
 | **Uzman** | Gelişmiş düzeydekilere ek olarak: güne özel ders saatleri (ör. Cuma erken çıkış), ek ziller (bayrak töreni vb.), ek zillerin çalma süresi, zile özel ses düzeyi, anons motoru, hızı ve ses düzeyi, ayarları yedekleme/geri yükleme, kayıtlar |
 | **Profesyonel** | Uzman düzeydekilere ek olarak: **Zil Listesi** (günün her zilini tek tek, her gün için ya da belirli bir gün için kapatma), **Zil Programları** (ör. «Kısaltılmış Ders», «Sınav Haftası» programlarını kaydetme, her gün kullanma veya belirli tarihlere atama), teknik ayarlar |
@@ -93,9 +108,10 @@ Kapatılan ziller ana ekranda gri ve «Kapalı» olarak görünmeye devam eder.
 |---|---|
 | ![Zil Sesleri](docs/ayarlar_zil_sesleri.png) | ![Programlar](docs/ayarlar_programlar.png) |
 
-## Varsayılan zil çizelgesi
+## Örnek zil çizelgesi
 
-Okulun 10G ders programına göre (Pazartesi–Cuma):
+Kurulum sihirbazındaki **Lise** şablonu (tekli öğretim, 8 ders, 40 dk ders, 10 dk teneffüs, 5. dersten sonra
+40 dk öğle arası), Pazartesi–Cuma:
 
 | Ders | Öğrenci Zili | Öğretmen Zili (başlangıç) | Çıkış Zili (bitiş) | Sonrasında |
 |---|---|---|---|---|
@@ -137,7 +153,8 @@ Python kuruluysa **`baslat.bat`** dosyasına çift tıklayın. İlk açılışta
 ### Öneriler
 
 - Ayarlar → Genel bölümünde **«Bilgisayar açılınca program otomatik başlasın»** seçeneğini işaretleyin.
-- Zil bilgisayarında uyku modunu kapatın. Program yalnızca açıkken zil çalabilir.
+- Program okul saatlerinde bilgisayarın uykuya geçmesini kendisi engeller; yine de bilgisayarın kapanmadığından
+  emin olun. Program yalnızca açıkken zil çalabilir.
 - Sesli anonslar ilk kez internet bağlantısıyla hazırlanır ve bilgisayara kaydedilir. Sonra internet
   olmadan da çalar. İnternet hiç yoksa Uzman düzeyde «Windows sesleri» motoru seçilebilir. Türkçe
   telaffuz için Windows'a Türkçe konuşma paketi yüklü olmalıdır.
@@ -166,9 +183,20 @@ python -m unittest discover -s tests    # testleri çalıştırır
 | `okul_zili/tray.py` | Sistem tepsisi simgesi |
 | `okul_zili/updater.py` | Programın kendini güncellemesi (GitHub sürümleri) |
 | `okul_zili/backup.py` | Tam yedek (ayarlar + sesler) |
-| `okul_zili/meb_takvim.py` | MEB çalışma takvimi verileri |
+| `okul_zili/meb_takvim.py` | MEB çalışma takvimi (yerleşik + internetten güncellenen `takvim/meb_takvim.json`) |
+| `okul_zili/templates.py` | Kurulum sihirbazındaki okul türü şablonları |
 | `okul_zili/rotation.py` | Değişen zil sesi (gün/hafta/ay için rastgele seçim) |
 | `okul_zili/library.py` | Ses kütüphanesi (kayıt listesi, kısa dosya adları) |
 | `okul_zili/downloader.py` | yt-dlp ile indirme, ffmpeg ile Opus'a dönüştürme, yt-dlp/Deno güncelleme |
 | `okul_zili/tts.py` | Türkçe sesli anons (edge-tts / pyttsx3) |
 | `okul_zili/ui/` | Arayüz (customtkinter) |
+
+### MEB takvimini güncelleme (her yıl)
+
+Yeni eğitim yılının takvimi açıklanınca [`takvim/meb_takvim.json`](takvim/meb_takvim.json) dosyasına o yılı
+ekleyin (aynı biçimde: `"2027-2028": {"holidays": [...]}`); programlar bir hafta içinde indirir.
+Yarım günlük tatillerde `"from": "13:00"` gibi zillerin susacağı saat yazılır.
+
+## Lisans
+
+[MIT](LICENSE) – ücretsiz kullanılabilir, değiştirilebilir ve dağıtılabilir.

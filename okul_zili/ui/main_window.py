@@ -165,6 +165,11 @@ class MainWindow(ctk.CTk):
         elif cfg.get("skip_date") == now.date().isoformat():
             text, btn, self._banner_kind = ("⚠  BUGÜN ZİLLER KAPALI – yarın otomatik olarak açılır",
                                             "Bugün de çalsın", "skip")
+        elif (cfg.get("short_day") or {}).get("date") == now.date().isoformat() and \
+                schedule.is_school_day(cfg, now.date()):
+            minutes = cfg["short_day"].get("lesson_minutes", 30)
+            text, btn, danger, self._banner_kind = (f"⏱  Bugün kısaltılmış ders ({minutes} dakika) – yarın ders "
+                                                    "saatleri normale döner", "Normale dön", False, "short")
         elif self._volume_problem(cfg):
             text, btn = self._volume_problem(cfg), "Ses ayarlarını aç"
             self._banner_kind = "volume"
@@ -202,6 +207,10 @@ class MainWindow(ctk.CTk):
         kind = getattr(self, "_banner_kind", "")
         if kind == "sound":
             self.open_library()
+            return
+        if kind == "short":
+            self.app.update_config(short_day=dict(self.app.cfg.get("short_day") or {}, date=None))
+            self.flash("✓  Ders saatleri normale döndü")
             return
         if kind == "volume":
             system.open_sound_settings()
@@ -279,12 +288,18 @@ class MainWindow(ctk.CTk):
         # Anahtarlar
         sw = ctk.CTkFrame(left, fg_color=theme.CARD_BG, corner_radius=16)
         sw.grid(row=2, column=0, sticky="ew", pady=(14, 0))
+        top = ctk.CTkFrame(sw, fg_color="transparent")
+        top.pack(fill="x", padx=4, pady=(10, 2))
         self.auto_var = ctk.BooleanVar()
         self.skip_var = ctk.BooleanVar()
-        ctk.CTkSwitch(sw, text="Ziller otomatik çalsın", variable=self.auto_var, font=theme.font(14, "bold"),
-                      command=self._toggle_auto).pack(side="left", padx=18, pady=14)
-        ctk.CTkSwitch(sw, text="Yalnızca bugün zilleri kapat", variable=self.skip_var,
-                      command=self._toggle_skip).pack(side="left", padx=18, pady=14)
+        ctk.CTkSwitch(top, text="Ziller otomatik çalsın", variable=self.auto_var, font=theme.font(14, "bold"),
+                      command=self._toggle_auto).pack(side="left", padx=14)
+        ctk.CTkSwitch(top, text="Yalnızca bugün zilleri kapat", variable=self.skip_var,
+                      command=self._toggle_skip).pack(side="left", padx=14)
+        self.short_btn = ctk.CTkButton(sw, text="⏱  Bugün kısaltılmış ders", width=200, height=30,
+                                       fg_color="transparent", border_width=1, text_color=theme.TEXT,
+                                       hover_color=theme.ROW_ALT, command=self.open_short_day)
+        self.short_btn.pack(anchor="w", padx=18, pady=(4, 10))
 
     def _build_right(self):
         card = Card(self, "Bugünkü Zil Çizelgesi")
@@ -312,8 +327,8 @@ class MainWindow(ctk.CTk):
     def refresh_all(self):
         cfg = self.app.cfg
         ctk.set_appearance_mode({"light": "light", "dark": "dark"}.get(cfg["theme"], "system"))
-        self.title(f"{APP_NAME} – {cfg['school_name']}")
-        name = cfg["school_name"]
+        self.title(f"{APP_NAME} – {cfg['school_name']}" if cfg.get("school_name") else APP_NAME)
+        name = cfg.get("school_name") or APP_NAME
         self.school_lbl.configure(text=name if len(name) <= 60 else name[:58] + "…")
         level = cfg.get("level") or "basit"
         self.level_btn.configure(text=f"Düzey: {LEVEL_NAMES[level]}")
@@ -434,6 +449,7 @@ class MainWindow(ctk.CTk):
     def _update(self, now):
         self._check_size()
         self.app.check_rotation(now)
+        self.app.check_calendar(now)
         if self.app.cfg.get("keep_awake", True) and schedule.is_school_day(self.app.cfg, now.date()):
             system.set_keep_awake(system.keep_awake_needed(self.app.scheduler.today_events(), now))
         else:
@@ -465,9 +481,12 @@ class MainWindow(ctk.CTk):
             if name:
                 self.day_info.configure(text=f"Tatil: {name}")
             elif events:
-                lessons = schedule.lessons_for_weekday(schedule.config_for_date(cfg, now.date()), now.weekday())
+                shifts = schedule.shifts_for_weekday(schedule.config_for_date(cfg, now.date()), now.weekday())
                 active = sum(1 for e in events if not e.off)
-                text = f"{len(lessons)} ders · {active} zil"
+                if len(shifts) > 1:
+                    text = " + ".join(f"{name} {len(rows)} ders" for _, name, rows, _ in shifts) + f" · {active} zil"
+                else:
+                    text = f"{len(shifts[0][2])} ders · {active} zil"
                 if active != len(events):
                     text += f" ({len(events) - active} zil kapalı)"
                 if self._row_toggles:
@@ -557,8 +576,23 @@ class MainWindow(ctk.CTk):
             return
         self.app.update_config(skip_date=dt.date.today().isoformat() if self.skip_var.get() else None)
 
+    def open_setup_wizard(self):
+        from .setup_wizard import SetupWizard
+
+        def done():
+            if not self.app.cfg.get("level"):
+                self.open_level_dialog()
+        SetupWizard(self, self.app, on_done=done)
+
     def open_level_dialog(self):
         LevelDialog(self, self.app.cfg.get("level"), on_select=lambda lv: self.app.update_config(level=lv))
+
+    def open_short_day(self):
+        from .short_day import ShortDayDialog
+        if not schedule.is_school_day(self.app.cfg, dt.date.today()):
+            messagebox.showinfo("Kısaltılmış ders", "Bugün okul günü değil.", parent=self)
+            return
+        ShortDayDialog(self, self.app)
 
     def open_library(self):
         from .library_window import LibraryWindow

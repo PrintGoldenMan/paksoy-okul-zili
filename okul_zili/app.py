@@ -10,7 +10,7 @@ import time
 
 import customtkinter as ctk
 
-from . import APP_NAME, __version__, autostart, config, paths, rotation, sounds, system, updater
+from . import APP_NAME, __version__, autostart, config, meb_takvim, paths, rotation, sounds, system, updater
 from .audio import Player
 from .config import BELL_NAMES, ring_seconds
 from .scheduler import BellScheduler
@@ -55,6 +55,8 @@ class App:
         self.volume = system.VolumeMonitor()
         self.clock = system.ClockMonitor()
         self.updates = updater.UpdateChecker(lambda: self.cfg.get("check_updates", True))
+        self.calendar = meb_takvim.CalendarUpdater()
+        self._calendar_checked = None
         if self.cfg.get("watchdog", True) != system.watchdog_installed():
             threading.Thread(target=system.set_watchdog, args=(self.cfg.get("watchdog", True),), daemon=True).start()
 
@@ -81,6 +83,21 @@ class App:
             if self.window is not None:
                 self.window.refresh_all()
 
+    def check_calendar(self, now):
+        """İnternetten yeni MEB takvimi geldiyse ya da gün değiştiyse tatilleri günceller (MEB takvimini kullananlarda)."""
+        if not self.calendar.changed and self._calendar_checked == now.date():
+            return
+        self.calendar.changed = False
+        self._calendar_checked = now.date()
+        changed = meb_takvim.auto_apply(self.cfg, now.date())
+        if changed:
+            log.info("MEB takvimi tatilleri güncellendi (%d kayıt)", changed)
+            self._save_quietly()
+            self.scheduler.reload()
+            if self.window is not None:
+                self.window.flash(f"📅  MEB takvimi güncellendi ({changed} tatil)")
+                self.window.refresh_all()
+
     def _on_player_state(self, playing, text):
         self.now_playing = text if playing else ""
 
@@ -90,7 +107,7 @@ class App:
 
     # Ana ekrandaki anahtarlarla değişen ayarlar: ayarlar penceresi açıkken değişmiş olabilirler,
     # pencere kaydedilince eski değerlerle ezilmemeleri için güncel halleri korunur.
-    RUNTIME_KEYS = ("auto_ring", "skip_date", "skip_today")
+    RUNTIME_KEYS = ("auto_ring", "skip_date", "skip_today", "short_day")
 
     def apply_config(self, new_cfg, keep_runtime=False):
         if keep_runtime:
@@ -167,7 +184,9 @@ class App:
         from .tray import Tray
         self.tray = Tray()
         self.scheduler.start()
-        if not self.cfg.get("level"):
+        if not self.cfg.get("setup_done", True):
+            self.window.after(300, self.window.open_setup_wizard)
+        elif not self.cfg.get("level"):
             self.window.after(300, self.window.open_level_dialog)
         self.window.mainloop()
 

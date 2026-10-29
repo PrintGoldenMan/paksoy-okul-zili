@@ -128,3 +128,66 @@ class UpdaterTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MebCalendarSyncTests(_TempHome):
+    def test_apply_is_idempotent_and_keeps_own_holidays(self):
+        cfg = config.default_config()
+        cfg["holidays"] = [{"name": "Okulun kendi tatili", "start": "2026-12-01", "end": "2026-12-01"}]
+        added = meb_takvim.apply_calendar(cfg, "2026-2027")
+        self.assertEqual(added, len(meb_takvim.BUILTIN["2026-2027"]["holidays"]))
+        self.assertEqual(meb_takvim.apply_calendar(cfg, "2026-2027"), 0)     # ikinci kez: değişiklik yok
+        self.assertIn({"name": "Okulun kendi tatili", "start": "2026-12-01", "end": "2026-12-01"}, cfg["holidays"])
+        self.assertTrue(all(h.get("meb") == "2026-2027" for h in cfg["holidays"][1:]))
+
+    def test_auto_apply_adds_new_year_from_downloaded_calendar(self):
+        cfg = config.default_config()
+        self.assertEqual(meb_takvim.auto_apply(cfg, dt.date(2027, 6, 1)), 0)   # MEB takvimi kullanılmıyor
+        meb_takvim.apply_calendar(cfg, "2026-2027")
+        downloaded = {"calendars": {"2027-2028": {"holidays": [
+            {"name": "Birinci dönem ara tatili", "start": "2027-11-15", "end": "2027-11-19"}]}}}
+        with open(meb_takvim._cache_file(), "w", encoding="utf-8") as f:
+            json.dump(downloaded, f)
+        self.assertEqual(meb_takvim.auto_apply(cfg, dt.date(2027, 6, 1)), 1)
+        self.assertEqual(schedule.holiday_name(cfg, dt.date(2027, 11, 17)), "Birinci dönem ara tatili")
+        self.assertEqual(meb_takvim.auto_apply(cfg, dt.date(2027, 6, 2)), 0)
+        cfg["meb_auto"] = False
+        self.assertEqual(meb_takvim.auto_apply(cfg, dt.date(2027, 6, 2)), 0)
+
+    def test_deleted_meb_holiday_stays_deleted_until_calendar_changes(self):
+        cfg = config.default_config()
+        meb_takvim.apply_calendar(cfg, "2026-2027")
+        cfg["holidays"] = [h for h in cfg["holidays"] if h["start"] != "2026-10-29"]   # okul bu gün açık
+        self.assertEqual(meb_takvim.auto_apply(cfg, dt.date(2026, 10, 30)), 0)
+        self.assertFalse(any(h["start"] == "2026-10-29" for h in cfg["holidays"]))
+        # MEB takvimi değişirse (ör. yeni tatil eklenir) takvim yeniden uygulanır
+        changed = {"calendars": {"2026-2027": {"holidays": meb_takvim.BUILTIN["2026-2027"]["holidays"] + [
+            {"name": "Ek tatil", "start": "2026-12-04", "end": "2026-12-04"}]}}}
+        with open(meb_takvim._cache_file(), "w", encoding="utf-8") as f:
+            json.dump(changed, f)
+        self.assertGreater(meb_takvim.auto_apply(cfg, dt.date(2026, 10, 30)), 0)
+        self.assertEqual(schedule.holiday_name(cfg, dt.date(2026, 12, 4)), "Ek tatil")
+
+    def test_invalid_download_is_ignored(self):
+        with open(meb_takvim._cache_file(), "w", encoding="utf-8") as f:
+            json.dump({"calendars": {"2027-2028": {"holidays": [{"start": 5}]}}}, f)
+        self.assertNotIn("2027-2028", meb_takvim.calendars())
+        self.assertIn("2026-2027", meb_takvim.calendars())
+
+
+class TemplateAndSetupTests(_TempHome):
+    def test_templates(self):
+        from okul_zili import templates
+        t1, t2 = templates.timing_for("ortaokul", False)
+        self.assertEqual((t1["lesson_count"], t2), (7, None))
+        t1, t2 = templates.timing_for("ilkokul", True)
+        self.assertLess(schedule.auto_lessons(t1)[-1][1], schedule.auto_lessons(t2)[0][0])
+
+    def test_existing_install_skips_wizard_new_install_runs_it(self):
+        from okul_zili import paths
+        self.assertFalse(config.load()["setup_done"])          # dosya yok: yeni kurulum
+        with open(paths.config_file(), "w", encoding="utf-8") as f:
+            json.dump({"school_name": "Eski Okul", "level": "basit"}, f)
+        cfg = config.load()
+        self.assertTrue(cfg["setup_done"])                      # sihirbazdan önceki sürüm: sorma
+        self.assertEqual(cfg["school_name"], "Eski Okul")

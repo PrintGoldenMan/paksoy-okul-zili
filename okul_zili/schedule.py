@@ -37,13 +37,14 @@ class BellEvent:
     volume: int = 100
     extra: dict = field(default_factory=dict)
     off: str = ""        # boş değilse zil çalmaz: "Kapalı" veya "Bugün kapalı"
+    shift: int = 1       # ikili öğretimde 1 = sabahçı, 2 = öğlenci
 
     @property
     def bell_id(self) -> str:
-        """Saatten bağımsız kalıcı kimlik (ör. "ogretmen-1")."""
+        """Saatten bağımsız kalıcı kimlik (ör. "ogretmen-1"; öğlencide "s2-ogretmen-1")."""
         if self.kind == "ek":
             return f"ek-{self.label}-{self.time_str}"
-        return f"{self.kind}-{self.lesson}"
+        return f"{'s2-' if self.shift == 2 else ''}{self.kind}-{self.lesson}"
 
     @property
     def time_str(self) -> str:
@@ -51,7 +52,7 @@ class BellEvent:
 
     @property
     def key(self) -> str:
-        return f"{self.minute}-{self.kind}-{self.lesson}-{self.label}"
+        return f"{self.minute}-{self.kind}-{self.shift}-{self.lesson}-{self.label}"
 
 
 def auto_lessons(timing: dict) -> list:
@@ -66,13 +67,80 @@ def auto_lessons(timing: dict) -> list:
 
 
 def config_for_date(cfg: dict, date: dt.date) -> dict:
-    """O tarihe bir zil programı atanmışsa, programın ayarlarıyla birleştirilmiş ayarları döndürür."""
+    """O tarihe bir zil programı atanmışsa, programın ayarlarıyla birleştirilmiş ayarları döndürür.
+    «Bugün kısaltılmış ders» seçildiyse o günün ders saatleri kısaltılır."""
     iso = date.isoformat()
     for item in cfg.get("profile_dates", []):
         profile = cfg.get("profiles", {}).get(item.get("profile"))
         if item.get("date") == iso and profile:
-            return dict(cfg, **profile)
+            cfg = dict(cfg, **profile)
+            break
+    short = cfg.get("short_day") or {}
+    if short.get("date") == iso:
+        cfg = shortened_config(cfg, date.weekday(), short)
     return cfg
+
+
+def shorten(lessons: list, lesson_minutes: int, break_minutes: int, lunch_minutes) -> dict:
+    """Ders saatlerini kısaltır: ilk ders aynı saatte başlar, ders sayısı aynı kalır.
+    Öğle arası (30 dk ve üzeri en uzun ara) yerinde kalır; süresi lunch_minutes olur (None = aynı)."""
+    gaps = [lessons[i + 1][0] - lessons[i][1] for i in range(len(lessons) - 1)]
+    lunch_after, lunch_len = 0, 0
+    if gaps and max(gaps) >= 30:
+        lunch_after = gaps.index(max(gaps)) + 1
+        lunch_len = max(gaps) if lunch_minutes is None else int(lunch_minutes)
+    return {"first_lesson": fmt_hm(lessons[0][0]), "lesson_count": len(lessons),
+            "lesson_minutes": int(lesson_minutes), "break_minutes": int(break_minutes),
+            "lunch_after": lunch_after, "lunch_minutes": lunch_len}
+
+
+def shortened_config(cfg: dict, weekday: int, short: dict) -> dict:
+    out = dict(cfg)
+    lesson_minutes = int(short.get("lesson_minutes", 30))
+    break_minutes = int(short.get("break_minutes", cfg["timing"].get("break_minutes", 10)))
+    lunch = short.get("lunch_minutes")
+    lessons = lessons_for_weekday(cfg, weekday)
+    if lessons:
+        out["timing"] = dict(cfg["timing"], **shorten(lessons, lesson_minutes, break_minutes, lunch))
+        out["schedule_mode"], out["day_overrides"] = "auto", {}
+    second = cfg.get("second_shift") or {}
+    if second.get("enabled"):
+        lessons2 = second_shift_lessons(cfg)
+        if lessons2:
+            out["second_shift"] = dict(second, schedule_mode="auto",
+                                       timing=dict(second.get("timing", {}),
+                                                   **shorten(lessons2, lesson_minutes, break_minutes, lunch)))
+    return out
+
+
+def second_shift_lessons(cfg: dict) -> list:
+    """İkili öğretimde öğlencilerin ders saatleri (kapalıysa boş liste)."""
+    second = cfg.get("second_shift") or {}
+    if not second.get("enabled"):
+        return []
+    if second.get("schedule_mode") == "manual":
+        out = []
+        for row in second.get("manual_lessons", []):
+            try:
+                out.append((parse_hm(row[0]), parse_hm(row[1])))
+            except (ValueError, TypeError, IndexError):
+                continue
+        return sorted(out)
+    try:
+        return auto_lessons(dict(cfg["timing"], **second.get("timing", {})))
+    except (KeyError, ValueError, TypeError):
+        return []
+
+
+def shifts_for_weekday(cfg: dict, weekday: int) -> list:
+    """[(vardiya no, ad, dersler, zamanlama)] – tekli öğretimde tek öğe, adı boş."""
+    first = lessons_for_weekday(cfg, weekday)
+    second = cfg.get("second_shift") or {}
+    if not second.get("enabled"):
+        return [(1, "", first, cfg["timing"])]
+    timing2 = dict(cfg["timing"], **second.get("timing", {}))
+    return [(1, cfg.get("first_shift_name") or "Sabahçı", first, cfg["timing"]),
+            (2, second.get("name") or "Öğlenci", second_shift_lessons(cfg), timing2)]
 
 
 def profile_name_for_date(cfg: dict, date: dt.date):
@@ -136,7 +204,7 @@ def _fill(template: str, lesson: int, minute: int) -> str:
         return template.strip()
 
 
-def _bell(cfg, minute, kind, lesson, variant, note):
+def _bell(cfg, minute, kind, lesson, variant, note, shift=1):
     b = cfg["bells"][kind]
     template = b.get("text", "")
     if variant == "lunch":
@@ -149,13 +217,14 @@ def _bell(cfg, minute, kind, lesson, variant, note):
         minute=minute, kind=kind, lesson=lesson, variant=variant,
         label=BELL_NAMES[kind], note=note, sound=rotation.effective_sound(b),
         text=text, tts=bool(b.get("tts")) and cfg["tts"].get("enabled", False),
-        duration=ring_seconds(b.get("duration")), volume=int(b.get("volume", 100)),
+        duration=ring_seconds(b.get("duration")), volume=int(b.get("volume", 100)), shift=shift,
     )
 
 
-def events_for_lessons(cfg: dict, lessons: list) -> list:
-    timing = cfg["timing"]
-    offset = int(timing.get("student_offset", 2))
+def events_for_lessons(cfg: dict, lessons: list, shift=1, shift_name="", timing=None) -> list:
+    timing = timing or cfg["timing"]
+    offset = int(cfg["timing"].get("student_offset", 2))
+    prefix = f"{shift_name} · " if shift_name else ""
     # Süreler ile hesaplanan programda öğle arası ayardan bilinir; elle girilen saatlerde
     # 30 dakika ve üzeri boşluk öğle arası sayılır.
     auto = lessons == auto_lessons(timing)
@@ -170,26 +239,36 @@ def events_for_lessons(cfg: dict, lessons: list) -> list:
         if offset > 0:
             student = start - offset
             if prev_end is None:
-                e = _bell(cfg, student, "ogrenci", i, "", "Öğrenciler sınıfa girer")
-                if not timing.get("morning_student_bell", True):
+                e = _bell(cfg, student, "ogrenci", i, "", prefix + "Öğrenciler sınıfa girer", shift)
+                if not cfg["timing"].get("morning_student_bell", True):
                     e.off = "Kapalı"   # Sabah Zilleri ayarından kapatıldı; listede görünür ama çalmaz
                 events.append(e)
             elif student > prev_end:
                 note = "Öğle arası bitmek üzere" if is_lunch(i - 1, start - prev_end) else "Teneffüs bitmek üzere"
-                events.append(_bell(cfg, student, "ogrenci", i, "", note))
-        e = _bell(cfg, start, "ogretmen", i, "", f"{i}. ders başlar")
-        if i == 1 and not timing.get("morning_teacher_bell", True):
+                events.append(_bell(cfg, student, "ogrenci", i, "", prefix + note, shift))
+        e = _bell(cfg, start, "ogretmen", i, "", f"{prefix}{i}. ders başlar", shift)
+        if i == 1 and not cfg["timing"].get("morning_teacher_bell", True):
             e.off = "Kapalı"
         events.append(e)
         if i == len(lessons):
-            variant, note = "last", "Okul dağılır"
+            variant, note = "last", (f"{shift_name} dersleri biter" if shift_name else "Okul dağılır")
         else:
             gap = lessons[i][0] - end
             if is_lunch(i, gap):
                 variant, note = "lunch", f"{i}. ders biter · Öğle arası ({gap} dk)"
             else:
                 variant, note = "", f"{i}. ders biter · Teneffüs ({gap} dk)"
-        events.append(_bell(cfg, end, "cikis", i, variant, note))
+        events.append(_bell(cfg, end, "cikis", i, variant, note if variant == "last" else prefix + note, shift))
+    return events
+
+
+def events_for_weekday(cfg: dict, weekday: int) -> list:
+    """Bir haftanın gününün bütün zilleri (tarihe bağlı tatil/kapatma uygulanmadan), sıralı."""
+    events = []
+    for shift, name, lessons, timing in shifts_for_weekday(cfg, weekday):
+        events += events_for_lessons(cfg, lessons, shift=shift, shift_name=name, timing=timing)
+    events += extra_events(cfg, weekday)
+    events.sort(key=lambda e: (e.minute, {"cikis": 0, "ek": 1, "ogrenci": 2, "ogretmen": 3}[e.kind]))
     return events
 
 
@@ -223,8 +302,7 @@ def events_for_date(cfg: dict, date: dt.date) -> list:
     if not is_school_day(cfg, date):
         return []
     cfg = config_for_date(cfg, date)
-    events = events_for_lessons(cfg, lessons_for_weekday(cfg, date.weekday()))
-    events += extra_events(cfg, date.weekday())
+    events = events_for_weekday(cfg, date.weekday())
     skip = cfg.get("skip_today") or {}
     skipped = skip.get("ids", []) if skip.get("date") == date.isoformat() else []
     half = half_day(cfg, date)
@@ -237,7 +315,6 @@ def events_for_date(cfg: dict, date: dt.date) -> list:
             e.off = "Kapalı"
         elif e.bell_id in skipped:
             e.off = "Bugün kapalı"
-    events.sort(key=lambda e: (e.minute, {"cikis": 0, "ek": 1, "ogrenci": 2, "ogretmen": 3}[e.kind]))
     return events
 
 
@@ -258,21 +335,34 @@ def current_status(cfg: dict, now: dt.datetime):
         name = holiday_name(cfg, date)
         return ("Bugün tatil" if name else "Bugün ders yok", name or "Ziller çalmayacak", None)
     cfg = config_for_date(cfg, date)
-    lessons = lessons_for_weekday(cfg, date.weekday())
+    # [(başlangıç, bitiş, vardiya adı, vardiyadaki ders no)] – ikili öğretimde iki vardiya art arda
+    lessons = []
+    for _, name, rows, _ in shifts_for_weekday(cfg, date.weekday()):
+        lessons += [(a, b, name, i) for i, (a, b) in enumerate(rows, start=1)]
+    lessons.sort()
     if not lessons:
         return ("Bugün ders yok", "Ders saati tanımlı değil", None)
+
+    def label(name, i):
+        return f"{name} · {i}. ders" if name else f"{i}. ders"
+
+    def left_text(minutes):
+        return f"{int(minutes)} dk {int((minutes % 1) * 60)} sn"
+
     m = now.hour * 60 + now.minute + now.second / 60
-    if m < lessons[0][0]:
-        return ("Dersler başlamadı", f"İlk ders {fmt_hm(lessons[0][0])}'da başlıyor", None)
-    for i, (start, end) in enumerate(lessons, start=1):
+    first = lessons[0]
+    if m < first[0]:
+        who = f"{first[2]} dersleri" if first[2] else "İlk ders"
+        return ("Dersler başlamadı", f"{who} {fmt_hm(first[0])}'da başlıyor", None)
+    for k, (start, end, name, i) in enumerate(lessons):
         if start <= m < end:
-            left = end - m
-            return (f"{i}. ders devam ediyor", f"Bitişe {int(left)} dk {int((left % 1) * 60)} sn",
-                    (m - start) / (end - start))
-        if i < len(lessons) and end <= m < lessons[i][0]:
-            nxt = lessons[i][0]
-            kind = "Öğle arası" if nxt - end >= 30 else "Teneffüs"
-            left = nxt - m
-            return (kind, f"{i + 1}. derse {int(left)} dk {int((left % 1) * 60)} sn",
-                    (m - end) / (nxt - end))
+            return (f"{label(name, i)} devam ediyor", f"Bitişe {left_text(end - m)}", (m - start) / (end - start))
+        if k + 1 < len(lessons) and end <= m < lessons[k + 1][0]:
+            nxt_start, _, nxt_name, nxt_i = lessons[k + 1]
+            if nxt_name != name:   # sabahçılar bitti, öğlenciler başlayacak
+                return (f"{name} dersleri bitti", f"{nxt_name} dersleri {fmt_hm(nxt_start)}'da başlıyor",
+                        (m - end) / (nxt_start - end))
+            kind = "Öğle arası" if nxt_start - end >= 30 else "Teneffüs"
+            title = f"{name} · {kind}" if name else kind
+            return (title, f"{label(nxt_name, nxt_i)}e {left_text(nxt_start - m)}", (m - end) / (nxt_start - end))
     return ("Dersler sona erdi", "İyi günler!", None)

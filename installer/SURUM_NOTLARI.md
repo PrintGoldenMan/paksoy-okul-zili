@@ -1,4 +1,4 @@
-## Okul Zili – Abdulkadir Paksoy Anadolu Lisesi otomatik zil programı
+## Okul Zili – okullar için otomatik zil programı
 
 ### İndirme
 | Dosya | Ne için? |
@@ -29,7 +29,15 @@ Her hafta (ya da her gün / her ay) farklı bir şarkı çalması için Ayarlar 
 Ses seçilmemiş zil sessiz kalmaz, Windows uyarı sesi çalar; ana ekranda sarı uyarı görünür.
 Oynatma listesi bağlantısı yapıştırılırsa program iki kez uyarır.
 
-### Bu sürümde yeni (1.2.0)
+### Bu sürümde yeni (1.3.0)
+- **Her okul için:** İlk açılışta kurulum sihirbazı (okul adı, okul türü, tekli/ikili öğretim, ders saatleri).
+- **İkili öğretim:** Sabahçı ve öğlenci gruplarının kendi ders saatleri; iki grubun zilleri art arda çalar.
+- **Bugün kısaltılmış ders** düğmesi: yalnızca bugün için ders süreleri kısalır, yarın normale döner.
+- **MEB takvimi internetten:** Yeni eğitim yılının takvimi açıklanınca tatiller kendiliğinden güncellenir.
+- **Ders saatlerini paylaşma:** Ders saatleri dosyaya kaydedilip başka okula verilebilir; kurulumda yüklenebilir.
+- «Sorun bildir» bağlantısı, MIT lisansı.
+
+### 1.2.0
 - Pencere kapatılınca program saatin yanındaki simgede çalışmaya devam eder; beklenmedik kapanmada kendiliğinden açılır.
 - Okul saatlerinde bilgisayar uykuya geçmez. Windows sesi kapalıysa ya da saat yanlışsa uyarı verilir.
 - «Güncelleme var» düğmesiyle program kendini günceller.

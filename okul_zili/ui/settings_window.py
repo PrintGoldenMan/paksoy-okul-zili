@@ -13,13 +13,15 @@ import copy
 import datetime as dt
 import json
 import os
+import re
+import webbrowser
 import subprocess
 import sys
 
 import customtkinter as ctk
 from tkinter import filedialog, messagebox
 
-from .. import __version__, autostart, backup, config, library, meb_takvim, paths, rotation, schedule, sounds, system, tts
+from .. import ISSUES_URL, __version__, autostart, backup, config, library, meb_takvim, paths, rotation, schedule, sounds, system, tts
 from ..config import (BELL_NAMES, BELL_TYPES, DEFAULT_RING_SECONDS, LEVEL_DESCRIPTIONS, LEVEL_NAMES, LEVELS,
                       MAX_RING_SECONDS, MIN_RING_SECONDS, ring_seconds)
 from ..schedule import fmt_hm, parse_hm
@@ -386,7 +388,17 @@ class SettingsWindow(ctk.CTkToplevel):
         self._pages = dict(pages)
         self._built = set()
         plain_set = self.tabs.set
-        self.tabs.set = lambda name: (plain_set(name), self._ensure_built(name))
+        tabs = self.tabs
+
+        def set_tab(name):
+            # Pencere henüz ekranda değilken ikinci kez sekme değiştirilirse içerik görünmez kalıyor
+            # (customtkinter); bu durumda geçiş, pencere görününce yapılır.
+            if tabs.get() != name and not self.winfo_viewable():
+                self.after(60, lambda: tabs.winfo_exists() and set_tab(name))
+                return
+            self._ensure_built(name)
+            plain_set(name)
+        self.tabs.set = set_tab
         for name, _ in pages:
             self.tabs.add(name)
         self.tabs.set(keep if keep in self._pages else pages[0][0])
@@ -523,6 +535,7 @@ class SettingsWindow(ctk.CTkToplevel):
                         variable=tray_var).grid(row=1, column=0, columnspan=3, sticky="w", pady=4)
 
         self._hint(f, "Ders saatlerini veya zil seslerini değiştirmek için yukarıdan «Basit» düzeyini seçin.")
+        self._help_card(f, wizard=False)
 
         def collect():
             cfg["master_volume"] = int(vol.get())
@@ -622,6 +635,8 @@ class SettingsWindow(ctk.CTkToplevel):
         ctk.CTkButton(row, text="Tam yedekten geri yükle…", width=200, fg_color="transparent", border_width=1,
                       text_color=theme.TEXT, command=self._full_restore).pack(side="left", padx=8)
 
+        self._help_card(f, wizard=True)
+
         def collect():
             if not name.get().strip():
                 raise ValueError("Okulun adı boş bırakılamaz.")
@@ -690,6 +705,8 @@ class SettingsWindow(ctk.CTkToplevel):
             labeled_row(b, 5, "Öğle arası süresi", lunch)
             auto_widgets = (first, count, length, brk, lunch_after, lunch)
 
+        second_collect = self._second_shift_card(f)
+
         b = self._card(f, "Öğrenci Zili", "Öğrenci zili, teneffüs bitmeden önce çalar; öğrenciler "
                                           "öğretmenlerden önce sınıfa girer.")
         offset = Spin(b, t["student_offset"], 0, 15, suffix="dakika önce")
@@ -723,7 +740,18 @@ class SettingsWindow(ctk.CTkToplevel):
                                  f"ancak en kısa teneffüs {shortest} dakika. Öğrenci zili teneffüsten önce "
                                  f"çalamayacağı için bazı öğrenci zilleri çalmaz. Lütfen "
                                  f"{max(0, shortest - 1)} dakika veya daha az girin.")
+            second_collect()
         self._collectors.append(collect)
+
+        b = self._card(f, "Ders Saatlerini Paylaş", "Ders saatlerini (ikili öğretim dahil) küçük bir dosyaya kaydedip "
+                                                    "başka bir okula verebilir ya da başka bir okulun dosyasını "
+                                                    "yükleyebilirsiniz. Sesler ve diğer ayarlar dosyaya girmez.")
+        row = ctk.CTkFrame(b, fg_color="transparent")
+        row.grid(row=0, column=0, sticky="w")
+        ctk.CTkButton(row, text="Ders saatlerini dışa aktar…", width=200,
+                      command=self._export_timetable).pack(side="left")
+        ctk.CTkButton(row, text="Şablon dosyası yükle…", width=180, fg_color="transparent", border_width=1,
+                      text_color=theme.TEXT, command=self._import_timetable).pack(side="left", padx=8)
 
         # Önizleme
         b = self._card(f, "Önizleme", "Ayarlarınıza göre bir okul gününün zil çizelgesi.")
@@ -740,15 +768,16 @@ class SettingsWindow(ctk.CTkToplevel):
             if not self._collect():
                 return
             wd = DAYS.index(day_menu.get())
-            lessons = schedule.lessons_for_weekday(self.cfg, wd)
-            events = schedule.events_for_lessons(self.cfg, lessons) + schedule.extra_events(self.cfg, wd)
-            events.sort(key=lambda e: e.minute)
+            events = schedule.events_for_weekday(self.cfg, wd)
             box.configure(state="normal")
             box.delete("1.0", "end")
             if wd not in self.cfg["active_days"]:
                 box.insert("end", f"Not: {DAYS[wd]} okul günü olarak işaretli değil; bu gün zil çalmaz.\n\n")
-            for i, (a, e) in enumerate(lessons, start=1):
-                box.insert("end", f"{i}. ders   {fmt_hm(a)} – {fmt_hm(e)}\n")
+            for _, name, lessons, _ in schedule.shifts_for_weekday(self.cfg, wd):
+                if name:
+                    box.insert("end", f"{name}\n")
+                for i, (a, e) in enumerate(lessons, start=1):
+                    box.insert("end", f"{i}. ders   {fmt_hm(a)} – {fmt_hm(e)}\n")
             box.insert("end", "\n")
             for e in events:
                 box.insert("end", f"{e.time_str}   {e.label:<14} {e.note}\n")
@@ -757,6 +786,138 @@ class SettingsWindow(ctk.CTkToplevel):
         day_menu.pack(side="left")
         ctk.CTkButton(row, text="Önizlemeyi güncelle", command=preview).pack(side="left", padx=8)
         self.after(50, preview)
+
+    def _help_card(self, f, wizard):
+        b = self._card(f, "Yardım", f"Okul Zili {__version__} · ücretsiz ve açık kaynaklı (MIT lisansı)")
+        row = ctk.CTkFrame(b, fg_color="transparent")
+        row.grid(row=0, column=0, sticky="w")
+        ctk.CTkButton(row, text="Sorun bildir / öneri gönder", width=200, fg_color="transparent", border_width=1,
+                      text_color=theme.TEXT, command=lambda: webbrowser.open(ISSUES_URL)).pack(side="left")
+        if wizard:
+            ctk.CTkButton(row, text="Kurulum sihirbazını yeniden aç", width=220, fg_color="transparent",
+                          border_width=1, text_color=theme.TEXT, command=self._rerun_wizard).pack(side="left", padx=8)
+
+    def _rerun_wizard(self):
+        if not messagebox.askyesno("Kurulum sihirbazı", "Kurulum sihirbazı okul türüne göre ders saatlerini yeniden "
+                                                        "doldurur; şu anki ders saatlerinin yerini alır (sesler, "
+                                                        "tatiller ve diğer ayarlar korunur). Devam edilsin mi?",
+                                   parent=self):
+            return
+        window = self.app.window
+        self._cancel_without_prompt()
+        if window is not None:
+            window.after(100, window.open_setup_wizard)
+
+    def _cancel_without_prompt(self):
+        self.app.player.stop_preview()
+        self.destroy()
+
+    def _second_shift_card(self, f):
+        """İkili öğretim (sabahçı / öğlenci) kartı. Toplama işlevini döndürür."""
+        cfg = self.cfg
+        sec = cfg["second_shift"]
+        b = self._card(f, "İkili Öğretim (Sabahçı / Öğlenci)",
+                       "Okulunuzda sabah ve öğleden sonra iki ayrı grup okuyorsa açın. Yukarıdaki ders saatleri "
+                       "sabahçıların, aşağıdakiler öğlencilerin olur; iki grubun zilleri aynı gün art arda çalar.")
+        enabled = ctk.BooleanVar(value=bool(sec.get("enabled")))
+
+        def toggle():
+            old = sec.get("enabled")
+            sec["enabled"] = bool(enabled.get())
+            if not self._rebuild():
+                sec["enabled"] = old
+                enabled.set(bool(old))
+        ctk.CTkSwitch(b, text="İkili öğretim var", variable=enabled, command=toggle,
+                      font=theme.font(14, "bold")).grid(row=0, column=0, columnspan=3, sticky="w")
+        if not sec.get("enabled"):
+            return lambda: None
+        st = sec.setdefault("timing", {})
+        manual = cfg.get("schedule_mode") == "manual" and self._at_least("gelismis")
+        sec["schedule_mode"] = "manual" if manual else "auto"
+        if manual:
+            ctk.CTkLabel(b, text="Öğlencilerin ders saatleri", font=theme.font(13, "bold")).grid(
+                row=1, column=0, columnspan=3, sticky="w", pady=(10, 2))
+            table = LessonTable(b, sec.get("manual_lessons") or [], fill_source=lambda: [
+                [fmt_hm(a), fmt_hm(e)] for a, e in schedule.auto_lessons(dict(cfg["timing"], **st))])
+            table.grid(row=2, column=0, columnspan=3, sticky="w")
+            widgets = None
+        else:
+            first = time_entry(b, st.get("first_lesson", "13:00"))
+            count = Spin(b, st.get("lesson_count", 6), 1, 12, suffix="ders")
+            length = Spin(b, st.get("lesson_minutes", cfg["timing"]["lesson_minutes"]), 10, 90, suffix="dakika")
+            brk = Spin(b, st.get("break_minutes", cfg["timing"]["break_minutes"]), 0, 60, suffix="dakika")
+            lunch_after = Spin(b, st.get("lunch_after", 0), 0, 12, suffix="dersten sonra")
+            lunch = Spin(b, st.get("lunch_minutes", 0), 0, 120, suffix="dakika")
+            for r, (label, w, hint) in enumerate((("Öğlenci ilk ders", first, None), ("Ders sayısı", count, None),
+                                                  ("Ders süresi", length, None), ("Teneffüs süresi", brk, None),
+                                                  ("Öğle arası kaçıncı", lunch_after, "0 = yok"),
+                                                  ("Öğle arası süresi", lunch, None)), start=1):
+                labeled_row(b, r, label, w, hint)
+            widgets = (first, count, length, brk, lunch_after, lunch)
+
+        def collect():
+            if widgets:
+                first, count, length, brk, lunch_after, lunch = widgets
+                try:
+                    st.update(first_lesson=fmt_hm(parse_hm(first.get())), lesson_count=count.get(),
+                              lesson_minutes=length.get(), break_minutes=brk.get(),
+                              lunch_after=lunch_after.get(), lunch_minutes=lunch.get())
+                except ValueError as exc:
+                    raise ValueError(f"Öğlenci ders saatleri: {exc or 'saat SS:DD biçiminde olmalı'}")
+            else:
+                sec["manual_lessons"] = table.get("Öğlenci ders saatleri")
+            morning = schedule.lessons_for_weekday(dict(cfg, day_overrides={}), 0)
+            afternoon = schedule.second_shift_lessons(cfg)
+            if morning and afternoon and afternoon[0][0] < morning[-1][1]:
+                raise ValueError(f"İkili öğretim: öğlencilerin ilk dersi ({fmt_hm(afternoon[0][0])}), sabahçıların "
+                                 f"son dersi bitmeden ({fmt_hm(morning[-1][1])}) başlıyor. Öğlenci ilk ders "
+                                 "saatini sonraya alın.")
+        return collect
+
+    TIMETABLE_KEYS = ("timing", "schedule_mode", "manual_lessons", "day_overrides", "second_shift",
+                      "first_shift_name", "school_type", "active_days")
+
+    def _export_timetable(self):
+        if not self._collect():
+            return
+        name = re.sub(r"[^\w-]+", "_", self.cfg.get("school_name") or "okul").strip("_")[:40]
+        path = filedialog.asksaveasfilename(parent=self, title="Ders saatlerini kaydet",
+                                            defaultextension=".okulzili-saatler",
+                                            initialfile=f"{name}_ders_saatleri.okulzili-saatler",
+                                            filetypes=[("Okul Zili ders saatleri", "*.okulzili-saatler")])
+        if not path:
+            return
+        data = {"okul_zili_ders_saatleri": 1, "school_name": self.cfg.get("school_name", ""),
+                **{k: self.cfg[k] for k in self.TIMETABLE_KEYS if k in self.cfg}}
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(data, fh, ensure_ascii=False, indent=2)
+        messagebox.showinfo("Dışa aktarıldı", "Ders saatleri kaydedildi. Bu dosyayı başka bir okula "
+                                              "verebilirsiniz; orada «Şablon dosyası yükle» ile açılır.", parent=self)
+
+    def _import_timetable(self):
+        path = filedialog.askopenfilename(parent=self, title="Ders saatleri dosyası seçin",
+                                          filetypes=[("Okul Zili ders saatleri", "*.okulzili-saatler *.json")])
+        if not path:
+            return
+        try:
+            with open(path, encoding="utf-8-sig") as fh:
+                data = json.load(fh)
+            if not isinstance(data, dict) or "okul_zili_ders_saatleri" not in data:
+                raise ValueError("Bu dosya bir Okul Zili ders saatleri dosyası değil.")
+        except Exception as exc:  # noqa: BLE001
+            messagebox.showerror("Yüklenemedi", f"Dosya okunamadı:\n{exc}", parent=self)
+            return
+        source = data.get("school_name") or "dosyadaki okul"
+        if not messagebox.askyesno("Ders saatlerini yükle", f"«{source}» ders saatleri yüklenecek; şu anki ders "
+                                                            "saatlerinin yerini alacak. Devam edilsin mi?", parent=self):
+            return
+        if not self._collect():
+            return
+        merged = config._sanitize(config._merge(self.cfg, {k: data[k] for k in self.TIMETABLE_KEYS if k in data}))
+        self.cfg.update({k: merged[k] for k in self.TIMETABLE_KEYS})
+        self._build_tabs(keep=self.tabs.get())
+        messagebox.showinfo("Yüklendi", "Ders saatleri yüklendi. Önizlemeden kontrol edip «Kaydet»e basın.",
+                            parent=self)
 
     def _tab_sounds(self, f):
         cfg = self.cfg
@@ -849,7 +1010,7 @@ class SettingsWindow(ctk.CTkToplevel):
             except (TypeError, ValueError):
                 return ""
 
-        def add(name="", start="", end="", from_=""):
+        def add(name="", start="", end="", from_="", meb=None):
             r = ctk.CTkFrame(holder, fg_color="transparent")
             r.pack(fill="x", pady=2)
             n = ctk.CTkEntry(r, width=260, placeholder_text="ör. Yarıyıl Tatili")
@@ -860,7 +1021,8 @@ class SettingsWindow(ctk.CTkToplevel):
                 if val:
                     w.insert(0, val)
                 w.pack(side="left", padx=3)
-            item = (r, n, s, e, fr)
+            # MEB takviminden gelen kayıt: değiştirilmezse takvim güncellenince kendiliğinden güncellenir
+            item = (r, n, s, e, fr, (meb, name, to_tr(start), to_tr(end) if end != start else "", from_ or ""))
             ctk.CTkButton(r, text="✕", width=30, fg_color="transparent", text_color=theme.DANGER,
                           hover_color=theme.ROW_ALT, command=lambda: (r.destroy(), rows.remove(item))).pack(
                 side="left", padx=6)
@@ -886,7 +1048,7 @@ class SettingsWindow(ctk.CTkToplevel):
             refresh_empty()
 
         for h in sorted(cfg["holidays"], key=lambda h: h.get("start", "")):
-            add(h.get("name", ""), h.get("start", ""), h.get("end", ""), h.get("from", ""))
+            add(h.get("name", ""), h.get("start", ""), h.get("end", ""), h.get("from", ""), h.get("meb"))
         refresh_empty()
 
         def add_meb():
@@ -898,12 +1060,16 @@ class SettingsWindow(ctk.CTkToplevel):
                                     "eklenmedi. Programın yeni sürümü çıkınca eklenecek; o zamana kadar tatilleri "
                                     "elle girebilirsiniz.", parent=self)
                 return
-            existing = {(n.get().strip(), s.get().strip()) for _, n, s, _, _ in rows}
+            year = meb_takvim.school_year(today)
+            existing = {(n.get().strip(), s.get().strip()) for _, n, s, _, _, _ in rows}
             added = 0
             for h in cal["holidays"]:
                 if (h["name"], to_tr(h["start"])) not in existing:
-                    add(h["name"], h["start"], h["end"], h.get("from", ""))
+                    add(h["name"], h["start"], h["end"], h.get("from", ""), year)
                     added += 1
+            meb_auto.set(True)
+            # Bu takvim sürümü uygulandı: sonradan silinen satırlar otomatik güncellemeyle geri gelmesin.
+            cfg.setdefault("meb_applied", {})[year] = meb_takvim._fingerprint(cal)
             messagebox.showinfo("MEB çalışma takvimi",
                                 f"{meb_takvim.school_year(today)} eğitim yılı için {added} tatil eklendi "
                                 "(ara tatiller, yarıyıl, bayramlar, 28 Ekim öğleden sonra, yaz tatili).\n\n"
@@ -912,7 +1078,7 @@ class SettingsWindow(ctk.CTkToplevel):
         def add_official():
             today = dt.date.today()
             y = today.year if today.month >= 8 else today.year - 1
-            existing = {s.get() for _, _, s, _, _ in rows}
+            existing = {s.get() for _, _, s, _, _, _ in rows}
             for name, d in (("Cumhuriyet Bayramı", dt.date(y, 10, 29)), ("Yılbaşı", dt.date(y + 1, 1, 1)),
                             ("Ulusal Egemenlik ve Çocuk Bayramı", dt.date(y + 1, 4, 23)),
                             ("Emek ve Dayanışma Günü", dt.date(y + 1, 5, 1)),
@@ -928,6 +1094,10 @@ class SettingsWindow(ctk.CTkToplevel):
                       text_color=theme.TEXT, command=add_official).pack(side="left")
         self._hint(b, "MEB takvimi; ara tatilleri, yarıyıl tatilini, dinî ve resmî bayramları ve yaz tatilini tek "
                       "tıkla ekler (Bakanlığın açıkladığı tarihlere göre).", row=2)
+        meb_auto = ctk.BooleanVar(value=cfg.get("meb_auto", True))
+        ctk.CTkCheckBox(b, text="Yeni eğitim yılının MEB takvimi açıklanınca tatiller kendiliğinden güncellensin "
+                                "(internetten)", variable=meb_auto).grid(row=3, column=0, columnspan=3, sticky="w",
+                                                                         pady=(8, 0))
 
         def parse_date(text, label):
             try:
@@ -939,7 +1109,8 @@ class SettingsWindow(ctk.CTkToplevel):
         def collect():
             cfg["active_days"] = [i for i, v in enumerate(day_vars) if v.get()]
             out = []
-            for _, n, s, e, fr in rows:
+            cfg["meb_auto"] = bool(meb_auto.get())
+            for _, n, s, e, fr, orig in rows:
                 if not (n.get().strip() or s.get().strip() or e.get().strip()):
                     continue
                 label = n.get().strip() or "Tatil"
@@ -948,6 +1119,9 @@ class SettingsWindow(ctk.CTkToplevel):
                 if end < start:
                     raise ValueError(f"Tatiller: «{label}» için bitiş tarihi başlangıçtan önce olamaz.")
                 entry = {"name": label, "start": start.isoformat(), "end": end.isoformat()}
+                meb, *orig_values = orig
+                if meb and [n.get().strip(), s.get().strip(), e.get().strip(), fr.get().strip()] == orig_values:
+                    entry["meb"] = meb   # değiştirilmemiş takvim kaydı
                 if fr.get().strip():
                     try:
                         entry["from"] = fmt_hm(parse_hm(fr.get()))
@@ -1075,7 +1249,7 @@ class SettingsWindow(ctk.CTkToplevel):
         cfg = self.cfg
         self._hint(f, "Belirli bir günün ders saatleri farklıysa (ör. Cuma günü erken çıkış) o gün için özel "
                       "saatler girebilirsiniz. Özel saat girilmeyen günlerde «Ders Saatleri» sekmesindeki "
-                      "ayarlar kullanılır.", row=0)
+                      "ayarlar kullanılır. İkili öğretimde buradaki saatler sabahçılar içindir.", row=0)
         seg = ctk.CTkSegmentedButton(f, values=DAYS)
         seg.grid(row=1, column=0, sticky="w", pady=8, padx=4)
         pages = {}
@@ -1265,10 +1439,7 @@ class SettingsWindow(ctk.CTkToplevel):
             scope = "all" if choice == "Her gün" else str(DAYS.index(choice))
             wd = 0 if scope == "all" else int(scope)
             tmp = dict(cfg, disabled_bells={})
-            events = schedule.events_for_lessons(tmp, schedule.lessons_for_weekday(tmp, wd))
-            if scope != "all":
-                events += schedule.extra_events(tmp, wd)
-            events.sort(key=lambda e: e.minute)
+            events = [e for e in schedule.events_for_weekday(tmp, wd) if scope != "all" or e.kind != "ek"]
             if not events:
                 ctk.CTkLabel(holder, text="Bu gün için zil yok.", text_color=theme.MUTED).grid(row=0, column=0)
             for r, e in enumerate(events):

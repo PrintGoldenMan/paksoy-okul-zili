@@ -53,7 +53,9 @@ DEFAULTS = {
     "version": 1,
     "level": None,  # İlk açılışta kullanıcıya sorulur.
     "theme": "system",
-    "school_name": "Abdulkadir Paksoy Anadolu Lisesi",
+    "school_name": "",           # ilk açılıştaki kurulum sihirbazında sorulur
+    "setup_done": False,         # kurulum sihirbazı tamamlandı mı (eski kurulumlarda True kabul edilir)
+    "school_type": "lise",
     "auto_ring": True,
     "master_volume": 85,
     "confirm_exit": True,
@@ -127,12 +129,26 @@ DEFAULTS = {
     "check_volume": True,        # Windows sesi kapalı/çok kısıksa uyar
     "prepare_announcements": True,
     "skip_date": None,  # "Bugün zilleri kapat" seçildiğinde o günün tarihi
+    # İkili öğretim: ilk vardiya yukarıdaki ders saatlerini kullanır; ikinci vardiyanın kendi saatleri vardır.
+    "first_shift_name": "Sabahçı",
+    "second_shift": {
+        "enabled": False,
+        "name": "Öğlenci",
+        "schedule_mode": "auto",
+        "timing": {"first_lesson": "13:00", "lesson_count": 6, "lesson_minutes": 40, "break_minutes": 10,
+                   "lunch_after": 0, "lunch_minutes": 0},
+        "manual_lessons": [],
+    },
+    # «Bugün kısaltılmış ders»: yalnızca o tarihte dersler kısaltılır
+    "short_day": {"date": None, "lesson_minutes": 30, "break_minutes": 10, "lunch_minutes": None},
+    "meb_applied": {},           # {"2026-2027": "<takvim parmak izi>"} – takvimin hangi sürümü uygulandı
+    "meb_auto": True,            # MEB takvimi internetten güncellenince tatiller kendiliğinden eklensin
     "autostart": False,
 }
 
 
 # Bir zil programını oluşturan ayarlar (Profesyonel düzeydeki "Zil Programları" bunları saklar).
-PROFILE_KEYS = ["timing", "schedule_mode", "manual_lessons", "day_overrides", "disabled_bells"]
+PROFILE_KEYS = ["timing", "schedule_mode", "manual_lessons", "day_overrides", "disabled_bells", "second_shift"]
 
 
 def profile_snapshot(cfg: dict) -> dict:
@@ -211,6 +227,15 @@ def _sanitize(cfg: dict) -> dict:
             fixed = _merge({k: cfg[k] for k in PROFILE_KEYS}, p)
             fixed["manual_lessons"] = _valid_rows(fixed.get("manual_lessons")) or cfg["manual_lessons"]
             cfg["profiles"][str(name)] = fixed
+    second = cfg.get("second_shift")
+    if not isinstance(second, dict):
+        cfg["second_shift"] = copy.deepcopy(DEFAULTS["second_shift"])
+    else:
+        second["manual_lessons"] = _valid_rows(second.get("manual_lessons"))
+        if not isinstance(second.get("timing"), dict):
+            second["timing"] = copy.deepcopy(DEFAULTS["second_shift"]["timing"])
+    if not isinstance(cfg.get("short_day"), dict):
+        cfg["short_day"] = copy.deepcopy(DEFAULTS["short_day"])
     disabled = cfg.get("disabled_bells") if isinstance(cfg.get("disabled_bells"), dict) else {}
     cfg["disabled_bells"] = {str(k): [x for x in v if isinstance(x, str)]
                              for k, v in disabled.items() if isinstance(v, list)}
@@ -251,6 +276,8 @@ def load() -> dict:
             data = json.load(f)
         if not isinstance(data, dict):
             raise ValueError("ayar dosyası bir nesne değil")
+        # Sihirbazdan önceki sürümlerle kurulmuş okullar: kurulum yapılmış sayılır, sihirbaz açılmaz.
+        data.setdefault("setup_done", True)
         return _sanitize(_migrate(_merge(DEFAULTS, data)))
     except (OSError, ValueError) as exc:
         log.error("Ayarlar okunamadı, varsayılanlar kullanılıyor: %s", exc)

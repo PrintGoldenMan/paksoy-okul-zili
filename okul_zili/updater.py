@@ -20,11 +20,11 @@ import urllib.request
 import webbrowser
 from pathlib import Path
 
-from . import __version__, paths
+from . import GITHUB_REPO, __version__, paths
 
 log = logging.getLogger(__name__)
 
-REPO = "PrintGoldenMan/paksoy-okul-zili"
+REPO = GITHUB_REPO
 LATEST_API = f"https://api.github.com/repos/{REPO}/releases/latest"
 NO_WINDOW = 0x08000000
 
