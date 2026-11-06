@@ -1,5 +1,6 @@
 """Saati izleyip zamanı gelen zilleri çalan arka plan görevi."""
 
+import copy
 import datetime as dt
 import logging
 import threading
@@ -15,6 +16,38 @@ GRACE_SECONDS = 45
 # yalnızca en son bekleyen zil çalar. Zilin saatinin üzerinden HELD_MAX_SECONDS geçtiyse artık çalmaz.
 HELD_GAP_SECONDS = 3
 HELD_MAX_SECONDS = 5 * 60
+
+
+# Zil çizelgesi hesaplanamazsa sırayla varsayılana döndürülen ayar bölümleri: yalnızca bozuk bölüm
+# sıfırlanır; tatiller, okul günleri ve diğer ayarlar korunur.
+FALLBACK_SECTIONS = (("holidays",), ("extra_bells",), ("profiles", "profile_dates"), ("short_day",),
+                     ("day_overrides",), ("second_shift",), ("disabled_bells", "skip_today"),
+                     ("timing", "schedule_mode", "manual_lessons"), ("bells",), ("tts",))
+
+
+def safe_events(cfg, date):
+    """schedule.events_for_date; ayarlardan biri bozuksa o bölüm varsayılana döndürülerek yeniden denenir."""
+    try:
+        return schedule.events_for_date(cfg, date)
+    except Exception:  # noqa: BLE001 - bozuk bir ayar yüzünden bütün gün zil susmasın
+        log.exception("Zil çizelgesi hesaplanamadı; bozuk ayar bölümü aranıyor")
+    from . import config
+    defaults = config.default_config()
+    reset = {}
+    for single in (True, False):
+        # Önce tek tek bölümler, olmazsa birikerek (birden çok bölüm bozuk olabilir) sıfırlanır.
+        for keys in FALLBACK_SECTIONS:
+            trial_reset = {} if single else reset
+            trial_reset.update({k: copy.deepcopy(defaults[k]) for k in keys})
+            try:
+                events = schedule.events_for_date(dict(cfg, **trial_reset), date)
+            except Exception:  # noqa: BLE001
+                continue
+            log.warning("Zil çizelgesi için şu ayarlar yok sayıldı (varsayılan kullanıldı): %s",
+                        ", ".join(trial_reset))
+            return events
+    log.error("Zil çizelgesi hesaplanamadı; varsayılan ders saatleri kullanılıyor")
+    return schedule.events_for_date(defaults, date)
 
 
 def _grace(cfg) -> int:
@@ -74,19 +107,7 @@ class BellScheduler:
             cfg = self._get_config()
             self._date = now.date()
             self._dirty = False
-            try:
-                self._events = schedule.events_for_date(cfg, self._date)
-            except Exception:  # noqa: BLE001 - bozuk bir ayar yüzünden bütün gün zil susmasın
-                log.exception("Zil çizelgesi hesaplanamadı; varsayılan ders saatleri kullanılıyor")
-                from . import config
-                fallback = config.default_config()
-                for key in ("bells", "master_volume", "tts", "auto_ring", "skip_date"):
-                    if key in cfg:
-                        fallback[key] = cfg[key]
-                try:
-                    self._events = schedule.events_for_date(fallback, self._date)
-                except Exception:  # noqa: BLE001
-                    self._events = schedule.events_for_date(config.default_config(), self._date)
+            self._events = safe_events(cfg, self._date)
             # Program açıldığında zamanı çoktan geçmiş zilleri "çalındı" say.
             sec = now.hour * 3600 + now.minute * 60 + now.second
             for e in self._events:
@@ -128,6 +149,14 @@ class BellScheduler:
         cfg = self._get_config()
         sec = now.hour * 3600 + now.minute * 60 + now.second
         grace = _grace(cfg)
+        take = getattr(self._player, "take_preempted", None)
+        preempted = take() if take is not None else []
+        if preempted:
+            # Tören, kuyrukta çalmayı bekleyen zili kesti: zil diğer bekletilenler gibi tören bitince çalar.
+            for e in preempted:
+                log.info("Tören başladı; sıradaki zil tören bitince çalacak: %s %s", e.time_str, e.label)
+            self._held = sorted(self._held + preempted, key=lambda e: e.minute)
+            self._release_at = None
         if self._held:
             if getattr(self._player, "ceremony_active", False):
                 self._release_at = None

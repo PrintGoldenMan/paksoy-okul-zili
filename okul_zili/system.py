@@ -323,8 +323,31 @@ def _linux_watchdog_installed() -> bool:
         return False
 
 
+def systemd_quote(value, exec_line=False) -> str:
+    """systemd birim dosyası için tırnaklı değer: \\ ve " kaçırılır, «%» (belirteç) ikilenir;
+    ExecStart satırında «$» (değişken) de ikilenir."""
+    value = str(value).replace("\\", "\\\\").replace('"', '\\"').replace("%", "%%")
+    if exec_line:
+        value = value.replace("$", "$$")
+    return f'"{value}"'
+
+
+# Bekçinin açtığı programa aktarılan oturum değişkenleri: pencere doğru ekranda görünsün; veri klasörü
+# ve tek kopya kilidi (XDG_DATA_HOME / XDG_CONFIG_HOME) aynı olsun, program iki kez açılmasın.
+_SESSION_VARS = ("DISPLAY", "WAYLAND_DISPLAY", "XAUTHORITY", "XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS",
+                 "XDG_DATA_HOME", "XDG_CONFIG_HOME")
+
+
+def watchdog_service_text(exe) -> str:
+    env = [f"Environment={systemd_quote(f'{k}={os.environ[k]}')}" for k in _SESSION_VARS if os.environ.get(k)]
+    return "\n".join([
+        "[Unit]", "Description=Okul Zili bekçisi (kapandıysa yeniden açar)", "",
+        # Bekçi programı ayrı bir süreç olarak açıp çıkar; KillMode=process açılan programı öldürmez.
+        "[Service]", "Type=oneshot", "KillMode=process", "TimeoutStartSec=60", *env,
+        "ExecStart=" + " ".join(systemd_quote(a, exec_line=True) for a in (exe, "--oz-watchdog")), ""])
+
+
 def _linux_set_watchdog(enabled: bool):
-    import shlex
     d = _systemd_user_dir()
     service, timer = d / f"{_UNIT}.service", d / f"{_UNIT}.timer"
     if not enabled:
@@ -335,15 +358,7 @@ def _linux_set_watchdog(enabled: bool):
         log.info("Bekçi zamanlayıcısı kaldırıldı")
         return
     d.mkdir(parents=True, exist_ok=True)
-    # Grafik oturumun değişkenleri: bekçi programı açtığında pencere doğru ekranda görünsün.
-    env = [f'Environment="{k}={os.environ[k]}"' for k in ("DISPLAY", "WAYLAND_DISPLAY", "XAUTHORITY",
-                                                            "XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS")
-           if os.environ.get(k)]
-    service.write_text("\n".join([
-        "[Unit]", "Description=Okul Zili bekçisi (kapandıysa yeniden açar)", "",
-        # Bekçi programı ayrı bir süreç olarak açıp çıkar; KillMode=process açılan programı öldürmez.
-        "[Service]", "Type=oneshot", "KillMode=process", "TimeoutStartSec=60", *env,
-        f"ExecStart={shlex.join([sys.executable, '--oz-watchdog'])}", ""]), encoding="utf-8")
+    service.write_text(watchdog_service_text(sys.executable), encoding="utf-8")
     timer.write_text("\n".join([
         "[Unit]", "Description=Okul Zili bekçisi: 5 dakikada bir", "",
         "[Timer]", "OnBootSec=2min", "OnUnitActiveSec=5min", "", "[Install]", "WantedBy=timers.target", ""]),
@@ -357,7 +372,114 @@ def _linux_set_watchdog(enabled: bool):
 
 
 def _schtasks(*args) -> subprocess.CompletedProcess:
-    return subprocess.run(["schtasks", *args], capture_output=True, text=True, timeout=30, **NO_WINDOW)
+    return subprocess.run(["schtasks", *args], capture_output=True, text=True, errors="replace", timeout=30,
+                          **NO_WINDOW)
+
+
+_NO_TIME_LIMIT = "<ExecutionTimeLimit>PT0S</ExecutionTimeLimit>"
+
+
+def watchdog_task_xml(exe, user=None, start=None) -> str:
+    """Windows bekçi görevi: 5 dakikada bir «exe --oz-watchdog». Bekçinin açtığı program görevin içinde
+    çalıştığı için süre sınırı kaldırılır (schtasks varsayılanı 72 saattir, program 3 gün sonra kapanırdı);
+    pille çalışan dizüstünde de durdurulmaz."""
+    from xml.sax.saxutils import escape
+    start = start or dt.datetime.now().replace(microsecond=0)
+    user_line = f"      <UserId>{escape(user)}</UserId>\n" if user else ""
+    return (
+        '<?xml version="1.0" encoding="UTF-16"?>\n'
+        '<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">\n'
+        "  <RegistrationInfo>\n"
+        "    <Description>Okul Zili kapandıysa yeniden açar</Description>\n"
+        "  </RegistrationInfo>\n"
+        "  <Triggers>\n"
+        "    <TimeTrigger>\n"
+        "      <Repetition>\n"
+        "        <Interval>PT5M</Interval>\n"
+        "        <StopAtDurationEnd>false</StopAtDurationEnd>\n"
+        "      </Repetition>\n"
+        f"      <StartBoundary>{start.isoformat()}</StartBoundary>\n"
+        "      <Enabled>true</Enabled>\n"
+        "    </TimeTrigger>\n"
+        "  </Triggers>\n"
+        "  <Principals>\n"
+        '    <Principal id="Author">\n'
+        f"{user_line}"
+        "      <LogonType>InteractiveToken</LogonType>\n"
+        "      <RunLevel>LeastPrivilege</RunLevel>\n"
+        "    </Principal>\n"
+        "  </Principals>\n"
+        "  <Settings>\n"
+        "    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>\n"
+        "    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>\n"
+        "    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>\n"
+        "    <AllowHardTerminate>true</AllowHardTerminate>\n"
+        "    <StartWhenAvailable>false</StartWhenAvailable>\n"
+        "    <IdleSettings>\n"
+        "      <StopOnIdleEnd>false</StopOnIdleEnd>\n"
+        "      <RestartOnIdle>false</RestartOnIdle>\n"
+        "    </IdleSettings>\n"
+        "    <AllowStartOnDemand>true</AllowStartOnDemand>\n"
+        "    <Enabled>true</Enabled>\n"
+        "    <Hidden>false</Hidden>\n"
+        f"    {_NO_TIME_LIMIT}\n"
+        "    <Priority>7</Priority>\n"
+        "  </Settings>\n"
+        '  <Actions Context="Author">\n'
+        "    <Exec>\n"
+        f"      <Command>{escape(str(exe))}</Command>\n"
+        "      <Arguments>--oz-watchdog</Arguments>\n"
+        "    </Exec>\n"
+        "  </Actions>\n"
+        "</Task>\n")
+
+
+def _windows_user():
+    domain, name = os.environ.get("USERDOMAIN"), os.environ.get("USERNAME")
+    return f"{domain}\\{name}" if domain and name else name
+
+
+def _create_windows_watchdog():
+    import tempfile
+    fd, xml_path = tempfile.mkstemp(prefix="okulzili_bekci_", suffix=".xml")
+    os.close(fd)
+    try:
+        with open(xml_path, "w", encoding="utf-16") as f:
+            f.write(watchdog_task_xml(sys.executable, _windows_user()))
+        r = _schtasks("/Create", "/TN", WATCHDOG_TASK, "/XML", xml_path, "/F")
+    finally:
+        try:
+            os.unlink(xml_path)
+        except OSError:
+            pass
+    if r.returncode != 0:
+        log.warning("Bekçi görevi XML ile kurulamadı, basit görev kuruluyor: %s", (r.stderr or r.stdout).strip())
+        command = f'"{sys.executable}" --oz-watchdog'
+        r = _schtasks("/Create", "/TN", WATCHDOG_TASK, "/TR", command, "/SC", "MINUTE", "/MO", "5", "/F")
+    return r
+
+
+def _windows_watchdog_current() -> bool:
+    """Kurulu görev bu programın yolunu ve süre sınırsız ayarı kullanıyor mu?"""
+    from xml.sax.saxutils import escape
+    r = _schtasks("/Query", "/TN", WATCHDOG_TASK, "/XML")
+    xml = r.stdout or ""
+    return r.returncode == 0 and _NO_TIME_LIMIT in xml and escape(sys.executable).lower() in xml.lower()
+
+
+def refresh_watchdog() -> None:
+    """Program dosyası taşınmış ya da güncellenmiş olabilir (taşınabilir sürümde eski .exe silinir):
+    bekçi görevi programın güncel yolunu kullansın. Windows'ta görev yalnızca farklıysa yeniden kurulur."""
+    if not watchdog_supported():
+        return
+    if IS_WINDOWS:
+        try:
+            if _windows_watchdog_current():
+                return
+        except Exception:  # noqa: BLE001
+            pass
+        log.info("Bekçi görevi programın güncel yoluyla yeniden kuruluyor")
+    set_watchdog(True)
 
 
 def watchdog_installed() -> bool:
@@ -384,8 +506,7 @@ def set_watchdog(enabled: bool) -> None:
         return
     try:
         if enabled:
-            command = f'"{sys.executable}" --oz-watchdog'
-            r = _schtasks("/Create", "/TN", WATCHDOG_TASK, "/TR", command, "/SC", "MINUTE", "/MO", "5", "/F")
+            r = _create_windows_watchdog()
         else:
             if not watchdog_installed():
                 return

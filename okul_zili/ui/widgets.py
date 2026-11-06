@@ -138,8 +138,9 @@ class SafeConfirm(ctk.CTkToplevel):
             side="left", padx=(0, 12))
         ctk.CTkLabel(head, text=heading, font=theme.font(19, "bold"), justify="left", anchor="w",
                      wraplength=440).pack(side="left", fill="x")
-        ctk.CTkLabel(self, text=message, font=theme.font(14), justify="left", anchor="w",
-                     wraplength=500).pack(fill="x", padx=26, pady=(4, 18))
+        self._msg = ctk.CTkLabel(self, text=message, font=theme.font(14), justify="left", anchor="w",
+                                 wraplength=480)
+        self._msg.pack(fill="x", padx=26, pady=(4, 18))
 
         row = ctk.CTkFrame(self, fg_color="transparent")
         row.pack(fill="x", padx=26, pady=(0, 22))
@@ -163,7 +164,18 @@ class SafeConfirm(ctk.CTkToplevel):
             self._tick()
         self.after(50, self._focus)
 
+    def _fit_text(self):
+        """Metin pencerenin içinde kaydırılsın (Linux'ta yazı tipleri daha geniş, sağdan taşıyordu)."""
+        try:
+            self.update_idletasks()
+            width = self._msg.winfo_width()
+            if width > 100:
+                self._msg.configure(wraplength=(width - 10) / self._get_widget_scaling())
+        except Exception:  # noqa: BLE001
+            pass
+
     def _focus(self):
+        self._fit_text()
         center_over(self)
         self.lift()
         self.cancel_btn.focus_set()

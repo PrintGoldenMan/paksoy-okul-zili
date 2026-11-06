@@ -82,6 +82,48 @@ class UISmokeTests(unittest.TestCase):
                 s._cancel_without_prompt()
         self.app.cfg["level"] = "basit"
 
+    def test_settings_save_keeps_background_changes(self):
+        import customtkinter as ctk
+        from okul_zili.ui.settings_window import SettingsWindow
+
+        def buttons(widget, text):
+            found = [widget] if isinstance(widget, ctk.CTkButton) and widget.cget("text") == text else []
+            for child in widget.winfo_children():
+                found += buttons(child, text)
+            return found
+        self.app.cfg["level"] = "uzman"
+        self.app.cfg["tts"]["offline_voice"] = "HKEY\\Voices\\TTS_MS_TR-TR_TOLGA_11.0"
+        s = SettingsWindow(self.win, self.app)
+        try:
+            for tab in list(s.tabs._name_list):
+                s._ensure_built(tab)
+            s.update()
+            # Ayarlar açıkken ana ekrandan / arka planda yapılan değişiklikler
+            self.app.cfg["holidays"] = [{"start": "2026-11-10", "end": "2026-11-10", "name": "Ara tatil"}]
+            self.app.cfg["meb_applied"] = {"2026-2027": "abc"}
+            # Ek ziller: ortadaki kart silinip yenisi eklenince kartlar üst üste binmemeli
+            extra = s.tabs.tab("Ek Ziller")
+            flag, friday = buttons(extra, "Pazartesi bayrak töreni")[0], buttons(extra, "Cuma haftayı kapatma")[0]
+            flag.invoke()
+            friday.invoke()
+            buttons(extra, "+ Ek zil ekle")[0].invoke()
+            buttons(extra, "Sil")[1].invoke()
+            friday.invoke()
+            s.update()
+            cards = [b.master.master for b in buttons(extra, "Sil")]
+            rows = [int(c.grid_info()["row"]) for c in cards]
+            self.assertEqual(len(rows), len(set(rows)), rows)
+            s._save()
+        finally:
+            if s.winfo_exists():
+                s._cancel_without_prompt()
+        cfg = self.app.cfg
+        self.assertEqual(cfg["holidays"][0]["name"], "Ara tatil")
+        self.assertEqual(cfg["meb_applied"], {"2026-2027": "abc"})
+        self.assertEqual(len(cfg["extra_bells"]), 3)
+        self.assertEqual(cfg["tts"]["offline_voice"], "HKEY\\Voices\\TTS_MS_TR-TR_TOLGA_11.0")
+        self.app.update_config(level="basit", holidays=[], extra_bells=[], meb_applied={})
+
     def test_dialogs(self):
         from okul_zili.ui.credits import CreditsDialog
         from okul_zili.ui.level_dialog import LevelDialog

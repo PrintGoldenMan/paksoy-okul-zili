@@ -36,6 +36,7 @@ def version_tuple(v: str):
 
 
 IS_LINUX = sys.platform.startswith("linux")
+IS_WINDOWS = os.name == "nt"
 
 
 def install_kind() -> str:
@@ -113,6 +114,9 @@ def _download(url, target: Path, progress=None):
             done += len(chunk)
             if progress and total:
                 progress(done / total)
+    if total and done != total:
+        # Bağlantı yarıda koptu: eksik dosya kurulmasın (taşınabilirde eski program silinir).
+        raise OSError(f"İndirme yarıda kesildi ({done} / {total} bayt). Lütfen tekrar deneyin.")
     if target.stat().st_size < 1_000_000:
         raise OSError("İndirilen dosya eksik görünüyor")
 
@@ -130,39 +134,62 @@ def updating_recently(seconds=900) -> bool:
         return False
 
 
+def _bat_path(path) -> str:
+    """Toplu iş dosyasında tırnak içinde kullanılacak yol: «%» ikilenir (değişken sanılmasın)."""
+    return str(path).replace("%", "%%")
+
+
+def update_script(commands) -> str:
+    """Program kapandıktan sonra çalışacak toplu iş dosyası (.bat). UTF-8 yazılır; «chcp 65001»
+    sayesinde Türkçe harfli yollar (ör. C:\\Users\\Öğretmen) doğru okunur."""
+    return "\r\n".join([
+        "@echo off",
+        "chcp 65001 >nul",
+        # Program kapanıp tek kopya kilidini bıraksın diye birkaç saniye beklenir
+        # (timeout girişsiz çalışamazsa ping ile beklenir).
+        "timeout /t 4 /nobreak >nul 2>&1 || ping -n 5 127.0.0.1 >nul",
+        *commands, ""])
+
+
+def _launch_script(tmp: Path, commands):
+    bat = tmp / "guncelle.bat"
+    bat.write_bytes(update_script(commands).encode("utf-8"))
+    comspec = os.environ.get("ComSpec") or "cmd.exe"
+    # Komut satırı olduğu gibi verilir (liste verilirse tırnaklar \" biçiminde bozulur); /s ile dıştaki
+    # tırnaklar kaldırılır, dosya yolu tırnak içinde kalır.
+    subprocess.Popen(f'"{comspec}" /d /s /c ""{bat}""', creationflags=NO_WINDOW, close_fds=True)
+
+
 def prepare_and_launch(info, progress=None):
     """Güncellemeyi indirir ve program kapandıktan sonra çalışacak şekilde başlatır.
     True dönerse çağıran program hemen kapanmalıdır."""
     kind = install_kind()
     if kind == "linux":
         return _prepare_linux(info, progress)
-    if os.name != "nt" or kind == "source" or not (info.get("installer") or info.get("portable")):
+    # Bu kurulum türünün dosyası sürümde yoksa sürüm sayfası açılır: kurulu programın yerine
+    # taşınabilir .exe yazılmasın (Program Files'a indirip kurulu programı silerdi).
+    if not IS_WINDOWS or kind not in ("installer", "portable") or not info.get(kind):
         webbrowser.open(info.get("page") or f"https://github.com/{REPO}/releases/latest")
         return False
     tmp = Path(tempfile.mkdtemp(prefix="okulzili_guncelleme_"))
-    if kind == "installer" and info.get("installer"):
+    if kind == "installer":
         setup = tmp / f"OkulZili-Kurulum-{info['version']}.exe"
         _download(info["installer"], setup, progress)
         exe_dir = str(Path(sys.executable).parent).lower()
         scope = "/ALLUSERS" if "program files" in exe_dir else "/CURRENTUSER"
         args = f"/SILENT /SUPPRESSMSGBOXES /NORESTART /CLOSEAPPLICATIONS /RELAUNCH=1 {scope}"
-        # Program kapanıp tek kopya kilidini bıraktıktan sonra kurulum başlasın diye birkaç saniye beklenir.
-        command = f'timeout /t 4 /nobreak >nul & start "" "{setup}" {args}'
+        commands = [f'start "" "{_bat_path(setup)}" {args}']
     else:
-        if not info.get("portable"):
-            webbrowser.open(info.get("page"))
-            return False
         current = Path(sys.executable)
         new = current.with_name(f"OkulZili-Tasinabilir-{info['version']}.exe")
         part = new.with_suffix(".exe.part")
         _download(info["portable"], part, progress)
         part.replace(new)
-        command = ('timeout /t 4 /nobreak >nul & '
-                   + (f'del /f /q "{current}" & ' if new.resolve() != current.resolve() else "")
-                   + f'start "" "{new}" --oz-restart')
+        commands = ([f'del /f /q "{_bat_path(current)}"'] if new.resolve() != current.resolve() else []) \
+            + [f'start "" "{_bat_path(new)}" --oz-restart']
     mark_updating()
     log.info("Güncelleme başlatılıyor: %s", info["version"])
-    subprocess.Popen(["cmd", "/c", command], creationflags=NO_WINDOW, close_fds=True)
+    _launch_script(tmp, commands)
     return True
 
 

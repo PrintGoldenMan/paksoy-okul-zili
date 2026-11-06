@@ -105,9 +105,12 @@ class LibraryWindow(ctk.CTkToplevel):
         ctk.CTkLabel(sec, text="–  Bitiş").pack(side="left", padx=6)
         self.end_e = ctk.CTkEntry(sec, width=90, justify="center", placeholder_text="5:35")
         self.end_e.pack(side="left")
-        self.section_hint = ctk.CTkLabel(sec, text="dakika:saniye  (tek şarkı bağlantılarında; listelerde olmaz)",
-                                         text_color=theme.MUTED, font=theme.font(12))
+        self.section_hint = ctk.CTkLabel(sec, text="dakika:saniye", text_color=theme.MUTED, font=theme.font(12))
         self.section_hint.pack(side="left", padx=(10, 0))
+        # Açıklama ayrı satırda: Linux'ta yazı tipleri daha geniş, tek satırda pencereye sığmıyordu.
+        ctk.CTkLabel(row, text="Bölüm seçimi yalnızca tek şarkı bağlantılarında kullanılabilir; oynatma listelerinde "
+                               "olmaz.", text_color=theme.MUTED, font=theme.font(12), anchor="w", justify="left",
+                     wraplength=760).grid(row=2, column=0, columnspan=3, sticky="w", pady=(2, 0))
         self._toggle_section()
 
         self.progress = ctk.CTkProgressBar(b, height=10)

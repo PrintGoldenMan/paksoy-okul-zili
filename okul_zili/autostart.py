@@ -98,3 +98,22 @@ def set_enabled(enabled: bool) -> None:
                     pass
     except OSError as exc:
         log.error("Otomatik başlatma ayarlanamadı: %s", exc)
+
+
+def refresh() -> None:
+    """Program taşınmış ya da güncellenmiş olabilir (taşınabilir sürümde eski .exe silinir):
+    otomatik başlatma kaydı programın güncel yolunu göstersin."""
+    if IS_LINUX:
+        set_enabled(True)
+        return
+    if os.name != "nt" or not getattr(sys, "frozen", False):
+        return
+    import winreg
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, _KEY) as k:
+            value = str(winreg.QueryValueEx(k, _NAME)[0])
+    except OSError:
+        return
+    if value.strip().lower() != _command().lower():
+        log.info("Otomatik başlatma kaydı güncel yola çevriliyor: %s", value)
+        set_enabled(True)

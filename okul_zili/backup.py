@@ -51,8 +51,21 @@ def read_backup_info(path) -> dict:
     return info
 
 
-def restore_backup(path) -> dict:
-    """Yedeği geri yükler: kütüphane yedektekiyle değiştirilir, ayarlar döndürülür (uygulamak çağırana kalır)."""
+def _copy_replace(src: Path, dest: Path):
+    """Önce yanına kopyalar, sonra yerine koyar: yarım kalmış dosya oluşmaz."""
+    part = dest.with_name(dest.name + ".part")
+    try:
+        shutil.copyfile(src, part)
+        part.replace(dest)
+    except OSError:
+        part.unlink(missing_ok=True)
+        raise
+
+
+def restore_backup(path, skipped=None) -> dict:
+    """Yedeği geri yükler: kütüphane yedektekiyle değiştirilir, ayarlar döndürülür (uygulamak çağırana kalır).
+    Kullanımda olduğu için (ör. o an çalan ses, Windows) yazılamayan ses dosyaları atlanır; adları
+    skipped listesine eklenir."""
     with zipfile.ZipFile(path) as zf:
         names = zf.namelist()
         if SETTINGS_NAME not in names:
@@ -69,8 +82,13 @@ def restore_backup(path) -> dict:
                 dest = library.library_dir()
                 for f in src_lib.iterdir():
                     if f.suffix == ".opus":
-                        shutil.copyfile(f, dest / f.name)
-                shutil.copyfile(src_lib / "kutuphane.json", dest / "kutuphane.json")
+                        try:
+                            _copy_replace(f, dest / f.name)
+                        except OSError as exc:
+                            log.warning("Ses dosyası geri yüklenemedi (kullanımda olabilir): %s: %s", f.name, exc)
+                            if skipped is not None:
+                                skipped.append(f.name)
+                _copy_replace(src_lib / "kutuphane.json", dest / "kutuphane.json")
                 library._library = None   # yeni listeyle yeniden yüklensin
     log.info("Tam yedek geri yüklendi: %s", path)
     return cfg

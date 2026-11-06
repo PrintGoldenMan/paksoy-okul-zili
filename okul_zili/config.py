@@ -1,8 +1,10 @@
 """Ayarların varsayılan değerleri, yüklenmesi ve kaydedilmesi."""
 
 import copy
+import datetime as dt
 import json
 import logging
+import math
 import os
 
 from . import paths
@@ -36,6 +38,8 @@ def ring_seconds(value) -> float:
     try:
         v = float(str(value).replace(",", "."))
     except (TypeError, ValueError):
+        return DEFAULT_RING_SECONDS
+    if not math.isfinite(v):
         return DEFAULT_RING_SECONDS
     return max(MIN_RING_SECONDS, min(MAX_RING_SECONDS, v))
 
@@ -162,6 +166,26 @@ def profile_snapshot(cfg: dict) -> dict:
     return {k: copy.deepcopy(cfg[k]) for k in PROFILE_KEYS}
 
 
+_MISSING = object()
+
+
+def merge_changes(base, mine, current):
+    """Üç yönlü birleştirme: ayarlar penceresi açılırken alınan kopya (base), pencerede düzenlenen
+    (mine) ve o arada programın kendisinin değiştirdiği güncel ayarlar (current; ör. MEB takvimi,
+    değişen ses, kütüphane). Pencerede değiştirilmeyen ayarın güncel hali korunur; ikisi de
+    değiştiyse pencere kazanır. Sözlükler anahtar anahtar birleştirilir."""
+    if isinstance(base, dict) and isinstance(mine, dict) and isinstance(current, dict):
+        out = {}
+        for key in list(mine) + [k for k in current if k not in mine]:
+            value = merge_changes(base.get(key, _MISSING), mine.get(key, _MISSING), current.get(key, _MISSING))
+            if value is not _MISSING:
+                out[key] = value
+        return out
+    if mine == base:
+        return copy.deepcopy(current) if current is not _MISSING else _MISSING
+    return copy.deepcopy(mine) if mine is not _MISSING else _MISSING
+
+
 def _merge(defaults, loaded):
     """Kayıtlı ayarları varsayılanların üstüne yazar; yeni sürümde eklenen anahtarlar korunur.
     Türü varsayılandan farklı olan değerler (ör. elle düzenlenip bozulmuş) yok sayılır."""
@@ -189,7 +213,8 @@ def _same_type(default, value) -> bool:
     if isinstance(default, bool) or isinstance(value, bool):
         return isinstance(default, bool) == isinstance(value, bool)
     if isinstance(default, (int, float)):
-        return isinstance(value, (int, float))
+        # JSON «Infinity»/«NaN» de sayı olarak okunur; int() ile hata verdiği için kabul edilmez.
+        return isinstance(value, (int, float)) and math.isfinite(value)
     return isinstance(value, type(default))
 
 
@@ -209,6 +234,70 @@ def _valid_rows(rows) -> list:
     return out
 
 
+def _iso_date(value):
+    """"2026-10-29" biçimindeki tarihi döndürür; geçersizse None."""
+    if not isinstance(value, str):
+        return None
+    try:
+        return dt.date.fromisoformat(value.strip()).isoformat()
+    except ValueError:
+        return None
+
+
+def _valid_holidays(items) -> list:
+    """Tatillerden başlangıcı, bitişi ve (yarım günse) saati geçerli olanlar; bozuk kayıt atılır."""
+    out = []
+    for h in items:
+        start = _iso_date(h.get("start"))
+        end = _iso_date(h.get("end")) if h.get("end") else start
+        fixed = dict(h, start=start, end=end)
+        if h.get("from"):
+            try:
+                hh, mm = (int(x) for x in str(h["from"]).strip().replace(".", ":").split(":"))
+                if not (0 <= hh < 24 and 0 <= mm < 60):
+                    raise ValueError(h["from"])
+                fixed["from"] = f"{hh:02d}:{mm:02d}"
+            except (TypeError, ValueError):
+                start = None
+        else:
+            fixed.pop("from", None)
+        if start is None or end is None or end < start:
+            log.warning("Tatil kaydı geçersiz, yok sayıldı: %s", h)
+            continue
+        if "name" in h and not isinstance(h["name"], str):
+            fixed["name"] = "Tatil"
+        out.append(fixed)
+    return out
+
+
+def _number(value, default, low, high):
+    """Elle yazılmış sayıyı sınırlar içine alır; sayı değilse (ör. «yüksek», null, Infinity) varsayılan."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        return default
+    return max(low, min(high, value))
+
+
+def _valid_extra_bells(items) -> list:
+    """Ek zillerin alanlarını denetler: türü yanlış alan varsayılana döner, saati bozuk zil atılır."""
+    out = []
+    for e in items:
+        if not isinstance(e.get("time"), str) or not isinstance(e.get("days", []), list):
+            log.warning("Ek zil geçersiz, yok sayıldı: %s", e)
+            continue
+        fixed = dict(e, days=[d for d in e.get("days", []) if isinstance(d, int) and not isinstance(d, bool)
+                              and 0 <= d <= 6])
+        for key in ("label", "sound", "text"):
+            if not isinstance(fixed.get(key, ""), str):
+                fixed[key] = ""
+        for key in ("enabled", "full"):
+            if key in fixed and not isinstance(fixed[key], bool):
+                fixed[key] = bool(fixed[key]) if isinstance(fixed[key], (int, float)) else key == "enabled"
+        fixed["volume"] = int(_number(fixed.get("volume", 100), 100, 0, 100))
+        fixed["duration"] = ring_seconds(fixed.get("duration"))
+        out.append(fixed)
+    return out
+
+
 def _sanitize(cfg: dict) -> dict:
     """Elle düzenlenmiş ayar dosyasındaki bozuk liste öğelerini atar; ziller bir hata yüzünden durmasın."""
     def dicts(value):
@@ -221,9 +310,8 @@ def _sanitize(cfg: dict) -> dict:
     cfg["day_overrides"] = {str(k): rows for k, v in overrides.items()
                             if str(k) in {str(i) for i in range(7)} and (rows := _valid_rows(v))}
     cfg["active_days"] = sorted({d for d in cfg.get("active_days", []) if isinstance(d, int) and 0 <= d <= 6})
-    cfg["holidays"] = [h for h in dicts(cfg.get("holidays")) if isinstance(h.get("start"), str)]
-    cfg["extra_bells"] = [e for e in dicts(cfg.get("extra_bells"))
-                          if isinstance(e.get("time"), str) and isinstance(e.get("days", []), list)]
+    cfg["holidays"] = _valid_holidays(dicts(cfg.get("holidays")))
+    cfg["extra_bells"] = _valid_extra_bells(dicts(cfg.get("extra_bells")))
     cfg["profile_dates"] = [d for d in dicts(cfg.get("profile_dates"))
                             if isinstance(d.get("date"), str) and isinstance(d.get("profile"), str)]
     profiles = cfg.get("profiles") if isinstance(cfg.get("profiles"), dict) else {}
@@ -243,6 +331,9 @@ def _sanitize(cfg: dict) -> dict:
             second["timing"] = copy.deepcopy(DEFAULTS["second_shift"]["timing"])
     if not isinstance(cfg.get("short_day"), dict):
         cfg["short_day"] = copy.deepcopy(DEFAULTS["short_day"])
+    lunch = cfg["short_day"].get("lunch_minutes")
+    if lunch is not None:
+        cfg["short_day"]["lunch_minutes"] = _number(lunch, None, 0, 180)
     cer = cfg.get("ceremony")
     if not isinstance(cer, dict) or not isinstance(cer.get("items"), dict):
         cfg["ceremony"] = cer = dict(cer if isinstance(cer, dict) else {},
@@ -256,7 +347,7 @@ def _sanitize(cfg: dict) -> dict:
                 item[field] = ""
     try:
         cer["volume"] = max(10, min(100, int(cer.get("volume", 100))))
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         cer["volume"] = 100
     disabled = cfg.get("disabled_bells") if isinstance(cfg.get("disabled_bells"), dict) else {}
     cfg["disabled_bells"] = {str(k): [x for x in v if isinstance(x, str)]
@@ -301,7 +392,7 @@ def load() -> dict:
         # Sihirbazdan önceki sürümlerle kurulmuş okullar: kurulum yapılmış sayılır, sihirbaz açılmaz.
         data.setdefault("setup_done", True)
         return _sanitize(_migrate(_merge(DEFAULTS, data)))
-    except (OSError, ValueError) as exc:
+    except Exception as exc:  # noqa: BLE001 - bozuk ayar dosyası programı açılışta çökertmesin
         log.error("Ayarlar okunamadı, varsayılanlar kullanılıyor: %s", exc)
         backup = path.with_suffix(".bozuk.json")
         try:

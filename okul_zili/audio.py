@@ -69,6 +69,7 @@ class Player:
         self.playing = False
         self._ceremony = None          # {"gen", "key", "title", "started", "length"} – tören sürerken
         self._ceremony_lock = threading.Lock()
+        self._preempted = []           # tören başlarken kuyrukta bekleyen zamanlanmış ziller (zamanlayıcı alır)
         self.on_ceremony_end = None    # (başlık, çalabildi mi, durduruldu mu) – arka plan iş parçacığından
         threading.Thread(target=self._worker, name="zil-oynatici", daemon=True).start()
 
@@ -82,7 +83,9 @@ class Player:
         """Töreni başlatır: çalan zil ve bekleyen her şey kesilir. Tören bitene kadar zamanlayıcı
         zilleri bekletir (ceremony_active)."""
         with self._ceremony_lock:
-            self.stop()
+            gen = self._gen
+            # Kuyrukta henüz çalmamış zamanlanmış ziller kaybolmasın: tören bitince çalsınlar.
+            self._preempted += [item[2] for item in self.stop() if item[0] == gen and item[1] == "scheduled"]
             length = sounds.length_seconds(sound_id)
             start, end = sounds.part(sound_id)
             if length:
@@ -97,8 +100,14 @@ class Player:
         with self._ceremony_lock:
             if self.ceremony_active:
                 return False
-            self.ring(event)
+            self._queue.put((self._gen, "scheduled", event, True))
             return True
+
+    def take_preempted(self) -> list:
+        """Tören yüzünden kuyruktan çıkarılan zamanlanmış zilleri verir (zamanlayıcı bunları bekletir)."""
+        with self._ceremony_lock:
+            out, self._preempted = self._preempted, []
+        return out
 
     @property
     def ceremony_active(self) -> bool:
@@ -141,14 +150,17 @@ class Player:
             self.stop_preview()
         self._queue.put((self._gen, "trysay" if preview else "say", text, tts_cfg))
 
-    def stop(self) -> None:
-        """Çalan sesi durdurur ve bekleyen tüm istekleri iptal eder (ana ekrandaki «Sustur»)."""
+    def stop(self) -> list:
+        """Çalan sesi durdurur ve bekleyen tüm istekleri iptal eder (ana ekrandaki «Sustur»).
+        İptal edilen istekleri döndürür."""
         self._gen += 1
+        drained = []
         try:
             while True:
-                self._queue.get_nowait()
+                drained.append(self._queue.get_nowait())
         except queue.Empty:
             pass
+        return drained
 
     def stop_preview(self) -> None:
         """Yalnızca ayarlar penceresinden başlatılan deneme seslerini durdurur; gerçek zillere dokunmaz."""
@@ -179,7 +191,7 @@ class Player:
             self._current_kind = kind
             cfg = self._get_config()
             try:
-                if kind == "event":
+                if kind in ("event", "scheduled"):
                     self._play_event(cfg, a, b, gen)
                 elif kind == "sound":
                     self._set_state(True, sounds.display_name(a))
@@ -298,7 +310,7 @@ class Player:
         if path is None or self._cancelled(gen):
             return True
         if not _ensure_mixer():
-            return _fallback_play(path)
+            return _fallback_play(path, lambda: self._cancelled(gen), duration)
         try:
             pygame.mixer.music.load(str(path))
         except Exception as exc:  # noqa: BLE001 - bozuk dosya ya da kopmuş ses aygıtı
@@ -378,12 +390,23 @@ def _beep_sound():
     return _beep
 
 
-def _fallback_play(path) -> bool:
-    """pygame kullanılamıyorsa sistemin kendi oynatıcısı denenir (Windows: WAV, Linux: paplay/pw-play/aplay)."""
+def _fallback_play(path, cancelled=lambda: False, duration=None) -> bool:
+    """pygame kullanılamıyorsa sistemin kendi oynatıcısı denenir (Windows: WAV, Linux: paplay/pw-play/aplay).
+    «Sustur» ya da tören (cancelled) ve süre (duration) dolunca çalma kesilir."""
+    limit = time.monotonic() + (duration or MAX_FULL_SECONDS)
     try:
         import winsound
         if str(path).lower().endswith(".wav"):
-            winsound.PlaySound(str(path), winsound.SND_FILENAME)
+            import wave
+            try:
+                with wave.open(str(path)) as w:
+                    limit = min(limit, time.monotonic() + w.getnframes() / w.getframerate())
+            except Exception:  # noqa: BLE001 - uzunluk okunamazsa süre sınırı geçerli
+                pass
+            winsound.PlaySound(str(path), winsound.SND_FILENAME | winsound.SND_ASYNC)
+            while time.monotonic() < limit and not cancelled():
+                time.sleep(0.05)
+            winsound.PlaySound(None, 0)   # çalan sesi durdurur
             return True
     except ImportError:
         import shutil
@@ -394,8 +417,20 @@ def _fallback_play(path) -> bool:
                 args = [exe, "-nodisp", "-autoexit", "-loglevel", "quiet", str(path)] if player == "ffplay" \
                     else [exe, str(path)]
                 try:
-                    return subprocess.run(args, timeout=MAX_FULL_SECONDS, capture_output=True).returncode == 0
-                except (OSError, subprocess.SubprocessError):
+                    proc = subprocess.Popen(args, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                            stderr=subprocess.DEVNULL)
+                except OSError:
                     continue
+                while proc.poll() is None:
+                    if cancelled() or time.monotonic() >= limit:
+                        proc.terminate()
+                        try:
+                            proc.wait(timeout=2)
+                        except subprocess.TimeoutExpired:
+                            proc.kill()
+                            proc.wait()
+                        return True
+                    time.sleep(0.05)
+                return proc.returncode == 0
     log.error("Ses çalınamadı (ses sistemi yok): %s", path)
     return False

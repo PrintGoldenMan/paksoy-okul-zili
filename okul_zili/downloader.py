@@ -257,6 +257,8 @@ def _fetch(url, progress=None, cancel=None) -> bytes:
                 buf.write(chunk)
                 if progress and total:
                     progress(buf.tell() / total, None)
+            if total and buf.tell() != total:
+                raise OSError(f"bağlantı yarıda kesildi ({buf.tell()} / {total} bayt)")
             return buf.getvalue()
     except Cancelled:
         raise

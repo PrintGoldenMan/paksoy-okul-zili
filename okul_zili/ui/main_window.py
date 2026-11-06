@@ -600,10 +600,14 @@ class MainWindow(ctk.CTk):
     # -- olaylar ------------------------------------------------------------
 
     def _ring_now(self, kind):
-        if not self._interrupt_ceremony(f"{BELL_NAMES[kind]} çalınsın mı?"):
+        question = f"{BELL_NAMES[kind]} şimdi bütün okulda çalınsın mı?"
+        # Tören sürüyorsa tek soru sorulur; tören yalnızca onaylanırsa durdurulur.
+        if self.app.player.ceremony_info:
+            if not self._interrupt_ceremony(question):
+                return
+        elif not messagebox.askyesno("Zil çal", question, parent=self):
             return
-        if messagebox.askyesno("Zil çal", f"{BELL_NAMES[kind]} şimdi bütün okulda çalınsın mı?", parent=self):
-            self.app.ring_now(kind)
+        self.app.ring_now(kind)
 
     def _interrupt_ceremony(self, question) -> bool:
         """Tören çalıyorsa önce sorulur; onaylanırsa tören durdurulur. False: hiçbir şey yapma."""
@@ -705,7 +709,11 @@ class MainWindow(ctk.CTk):
         SetupWizard(self, self.app, on_done=done)
 
     def open_level_dialog(self):
-        LevelDialog(self, self.app.cfg.get("level"), on_select=lambda lv: self.app.update_config(level=lv))
+        if getattr(self, "_level_dlg", None) is not None and self._level_dlg.winfo_exists():
+            self._level_dlg.lift()
+            return
+        self._level_dlg = LevelDialog(self, self.app.cfg.get("level"),
+                                      on_select=lambda lv: self.app.update_config(level=lv))
 
     def open_credits(self):
         from .credits import CreditsDialog
@@ -719,7 +727,10 @@ class MainWindow(ctk.CTk):
         if not schedule.is_school_day(self.app.cfg, dt.date.today()):
             messagebox.showinfo("Kısaltılmış ders", "Bugün okul günü değil.", parent=self)
             return
-        ShortDayDialog(self, self.app)
+        if getattr(self, "_short_day", None) is not None and self._short_day.winfo_exists():
+            self._short_day.lift()
+            return
+        self._short_day = ShortDayDialog(self, self.app)
 
     def open_library(self):
         from .library_window import LibraryWindow

@@ -35,7 +35,22 @@ Oynatma listesi bağlantısı yapıştırılırsa program iki kez uyarır.
 **OkulZili-Linux-x86_64-….tar.gz** dosyasını indirip açın; klasörde uçbirimde `sh kur.sh` yazın (yönetici izni
 gerekmez). Program uygulama menüsüne eklenir: Eğitim → Okul Zili. Ayrıntılar paketteki BENIOKU.txt dosyasında.
 
-### Bu sürümde yeni (1.4.1)
+### Bu sürümde yeni (1.4.2) – hata düzeltmeleri
+- **Ayarlar → Zil Sesleri açılmıyordu** (1.4.0 ve 1.4.1); düzeltildi.
+- **Windows'ta güncelleme:** «Güncelle»den sonra kurulum / yeni program bazı bilgisayarlarda başlamayabiliyordu;
+  güncelleme artık ayrı bir komut dosyasıyla güvenilir şekilde başlatılır. Yarıda kesilen indirme kurulmaz.
+- Taşınabilir sürüm güncellenince otomatik başlatma ve «kapanırsa yeniden aç» yeni dosyayı gösterir.
+- «Kapanırsa yeniden aç» ile açılan program 3 gün sonra Windows tarafından kapatılmaz.
+- Ayarlar penceresi açıkken başka yerden yapılan değişiklikler (düzey, MEB takvimi, kütüphanede silinen ses,
+  değişen ses) «Kaydet» ile geri alınmaz.
+- Bozuk bir tatil ya da ek zil kaydı bütün günün zillerini bozmaz; yalnızca o kayıt yok sayılır. Aynı dakikadaki
+  iki ek zil ikisi de çalar.
+- Tören başladığı anda sırada bekleyen zil kaybolmaz, törenden sonra çalar.
+- Kayıtlı internetsiz anons sesi «Kaydet»te sıfırlanmıyordu; ek zil kartları silindikten sonra üst üste
+  binmiyor; pencereler çift tıklamayla iki kez açılmıyor; Linux'ta bazı yazılar kesilmiyor.
+- Yedekten geri yüklerken o an çalan ses dosyası işlemi yarıda bırakmaz.
+
+### 1.4.1
 - Linux: Lubuntu/LXQt gibi eski X11 tepsisi olmayan masaüstlerinde tepsi simgesi hata veriyordu; artık
   denenmez (pencere kapatılınca görev çubuğuna küçülür, «⏻ Programı kapat» ile kapanır).
 

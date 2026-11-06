@@ -332,6 +332,8 @@ class SettingsWindow(ctk.CTkToplevel):
         super().__init__(master)
         self.app = app
         self.cfg = copy.deepcopy(app.cfg)
+        # Kaydederken üç yönlü birleştirme için: pencere açıkken başka yerden yapılan değişiklikler korunur.
+        self._base_cfg = copy.deepcopy(app.cfg)
         self.level = self.cfg.get("level") or "basit"
         self.title("Okul Zili – Ayarlar")
         fit_to_screen(self, 1040, 800)
@@ -532,7 +534,7 @@ class SettingsWindow(ctk.CTkToplevel):
                 d = dur.get()
             except ValueError:
                 d = None
-            self.app.player.preview_sound(cfg["bells"]["ogretmen"]["sound"], d)
+            self.app.player.preview_sound(rotation.effective_sound(cfg["bells"]["ogretmen"]), d)
         ctk.CTkButton(b, text="▶ Sesi dene", width=110, command=try_sound).grid(row=0, column=3, padx=8)
 
         self._morning_card(f)
@@ -821,10 +823,14 @@ class SettingsWindow(ctk.CTkToplevel):
         CreditsDialog(self)
 
     def _rerun_wizard(self):
-        if not messagebox.askyesno("Kurulum sihirbazı", "Kurulum sihirbazı okul türüne göre ders saatlerini yeniden "
-                                                        "doldurur; şu anki ders saatlerinin yerini alır (sesler, "
-                                                        "tatiller ve diğer ayarlar korunur). Devam edilsin mi?",
-                                   parent=self):
+        unsaved = self._snapshot() != self._baseline
+        text = ("Kurulum sihirbazı okul türüne göre ders saatlerini yeniden doldurur; şu anki ders saatlerinin "
+                "yerini alır (sesler, tatiller ve diğer ayarlar korunur).")
+        if unsaved:
+            text += ("\n\nBu pencerede yaptığınız değişiklikler henüz kaydedilmedi ve kaybolacak. Önce kaydetmek "
+                     "isterseniz «Hayır»a basıp «Kaydet»i kullanın.")
+        if not messagebox.askyesno("Kurulum sihirbazı", text + "\n\nDevam edilsin mi?",
+                                   icon="warning" if unsaved else "question", parent=self):
             return
         window = self.app.window
         self._cancel_without_prompt()
@@ -1011,6 +1017,7 @@ class SettingsWindow(ctk.CTkToplevel):
         b = self._card(f, "Tören Sesleri", "Ana ekrandaki tören düğmeleri bu sesleri çalar. Tören sürerken "
                                            "ziller çalmaz; zamanı gelen zil tören bitince çalar.")
         pickers = {}
+        initial = {key: ceremony.sound_of(self.cfg, key) for key in ceremony.KEYS}
         for r, key in enumerate(ceremony.KEYS):
             ctk.CTkLabel(b, text=ceremony.name(key), width=210, anchor="w", font=theme.font(13, "bold")).grid(
                 row=r, column=0, sticky="w", pady=4)
@@ -1046,12 +1053,15 @@ class SettingsWindow(ctk.CTkToplevel):
         def collect():
             items = cer.setdefault("items", {})
             for key, picker in pickers.items():
-                items.setdefault(key, {})["sound"] = picker.get()
+                # Değiştirilmediyse yazılmaz: boş seçim (programla gelen ses) olduğu gibi kalır, ana ekrandan
+                # o arada indirilen tören sesi kaydedince ezilmez.
+                if picker.get() != initial[key]:
+                    items.setdefault(key, {})["sound"] = picker.get()
             cer.update(volume=int(vol.get()), show=bool(show.get()), confirm=bool(confirm.get()))
         self._collectors.append(collect)
 
     def _download_ceremony(self, key):
-        from .ceremony_ui import CeremonyDownloadDialog
+        from .ceremony_ui import open_download
 
         def done(item):
             picker = self._ceremony_pickers.get(key)
@@ -1066,7 +1076,7 @@ class SettingsWindow(ctk.CTkToplevel):
                                              parent=self):
             done(found)
             return
-        CeremonyDownloadDialog(self, key, ceremony.url_of(self.cfg, key), done)
+        open_download(self, key, ceremony.url_of(self.cfg, key), done)
 
     def _tab_days(self, f):
         cfg = self.cfg
@@ -1251,16 +1261,23 @@ class SettingsWindow(ctk.CTkToplevel):
             pause = Spin(b, tc.get("pause_ms", 400), 0, 5000, suffix="milisaniye")
             labeled_row(b, 3, "Zil ile anons arası", pause)
             off_voices = [("", "Otomatik (Türkçe ses varsa)")]
+            saved_voice = tc.get("offline_voice", "")
+            if saved_voice:
+                # Kayıtlı ses, «Sesleri listele»ye basılmadan da seçili kalsın (kaydedince silinmesin).
+                off_voices.append((saved_voice, "Seçili: " + saved_voice.replace("/", "\\").split("\\")[-1]))
             off_menu = ctk.CTkOptionMenu(b, values=[n for _, n in off_voices], width=380)
-            off_menu.set(off_voices[0][1])
+            off_menu.set(off_voices[-1][1])
             labeled_row(b, 4, "Bilgisayardaki ses", off_menu)
 
             def load_voices():
+                chosen = next((vid for vid, n in off_voices if n == off_menu.get()), "")
                 found = tts.offline_voices()
-                off_voices[1:] = found
+                kept = [] if not chosen or any(vid == chosen for vid, _ in found) else \
+                    [v for v in off_voices if v[0] == chosen]
+                off_voices[1:] = found + kept
                 off_menu.configure(values=[n for _, n in off_voices])
                 for vid, n in off_voices:
-                    if vid == tc.get("offline_voice", ""):
+                    if vid == chosen:
                         off_menu.set(n)
                 if not found:
                     messagebox.showinfo("Bilgisayardaki sesler", "Bu bilgisayarda yüklü ses bulunamadı." +
@@ -1383,12 +1400,14 @@ class SettingsWindow(ctk.CTkToplevel):
         holder.grid(row=1, column=0, sticky="ew")
         holder.grid_columnconfigure(0, weight=1)
         items = []
+        next_row = [1]   # silinen kartın satırı yeniden kullanılmaz: kartlar üst üste binmesin
 
         def add(e=None):
             e = e or {"enabled": True, "time": "08:20", "days": [0], "label": "Yeni zil",
                       "sound": "", "text": "", "duration": DEFAULT_RING_SECONDS, "full": True}
             card = ctk.CTkFrame(holder, fg_color=theme.CARD_BG, corner_radius=12)
-            card.grid(row=len(items) + 1, column=0, sticky="ew", pady=5, padx=4)
+            card.grid(row=next_row[0], column=0, sticky="ew", pady=5, padx=4)
+            next_row[0] += 1
             line1 = ctk.CTkFrame(card, fg_color="transparent")
             line1.pack(fill="x", padx=12, pady=(10, 4))
             en = ctk.BooleanVar(value=e.get("enabled", True))
@@ -1774,11 +1793,16 @@ class SettingsWindow(ctk.CTkToplevel):
                                            "Şu anki ayarların ve kütüphanenin yerini yedektekiler alacak. "
                                            "Devam edilsin mi?", icon="warning", parent=self):
             return
+        skipped = []
         try:
-            cfg = backup.restore_backup(path)
+            cfg = backup.restore_backup(path, skipped)
         except Exception as exc:  # noqa: BLE001
             messagebox.showerror("Geri yüklenemedi", f"Yedek geri yüklenemedi:\n{exc}", parent=self)
             return
+        if skipped:
+            messagebox.showwarning("Bazı sesler geri yüklenemedi",
+                                   f"{len(skipped)} ses dosyası o an kullanımda olduğu için değiştirilemedi; "
+                                   "bu seslerin şu anki hali kullanılmaya devam edecek.", parent=self)
         self.app.apply_config(cfg, keep_runtime=True)
         if self.app.window is not None:
             self.app.window.flash("✓  Yedek geri yüklendi")
@@ -1832,7 +1856,7 @@ class SettingsWindow(ctk.CTkToplevel):
                                      "olabilir.\n\nYine de kaydedilsin mi?", parent=self):
                 return
         self.cfg["level"] = self.level
-        self.app.apply_config(self.cfg, keep_runtime=True)
+        self.app.apply_config(self.cfg, keep_runtime=True, base=self._base_cfg)
         self.app.player.stop_preview()
         if self.app.window is not None:
             self.app.window.flash("✓  Ayarlar kaydedildi")

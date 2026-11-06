@@ -1,6 +1,6 @@
 """Okul Zili – okullar için otomatik zil programı."""
 
-__version__ = "1.4.1"
+__version__ = "1.4.2"
 APP_NAME = "Okul Zili"
 # Güncellemeler, MEB takvimi ve «Sorun bildir» bu GitHub deposundan gelir.
 GITHUB_REPO = "PrintGoldenMan/paksoy-okul-zili"

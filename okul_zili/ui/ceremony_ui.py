@@ -100,6 +100,19 @@ class CeremonyDownloadDialog(ctk.CTkToplevel):
             self._on_done(item)
 
 
+_dialog = None
+
+
+def open_download(master, key, url, on_done):
+    """İndirme penceresini açar; zaten açıksa öne getirir (çift tıklamayla iki kez indirilmesin)."""
+    global _dialog
+    if _dialog is not None and _dialog.winfo_exists():
+        _dialog.lift()
+        return _dialog
+    _dialog = CeremonyDownloadDialog(master, key, url, on_done)
+    return _dialog
+
+
 def ensure_sound(master, app, key, on_ready):
     """Tören sesi hazırsa on_ready() çağrılır; değilse kütüphanede aranır ya da indirmesi önerilir."""
     cfg = app.cfg
@@ -108,9 +121,11 @@ def ensure_sound(master, app, key, on_ready):
         return
 
     def use(item):
-        items = dict(cfg["ceremony"]["items"])
+        # İndirme uzun sürebilir; bu arada ayarlar değişmiş olabilir: güncel ayarlar okunur.
+        cer = app.cfg["ceremony"]
+        items = dict(cer["items"])
         items[key] = dict(items.get(key) or {}, sound=library.PREFIX + item["id"])
-        app.update_config(ceremony=dict(cfg["ceremony"], items=items))
+        app.update_config(ceremony=dict(cer, items=items))
         on_ready()
 
     found = ceremony.find_in_library(ceremony.url_of(cfg, key))
@@ -120,7 +135,7 @@ def ensure_sound(master, app, key, on_ready):
     name = ceremony.name(key)
     if messagebox.askyesno(name, f"«{name}» henüz indirilmedi.\n\nŞimdi internetten indirilsin mi? "
                                  "(Bir kez indirilir; sonra internet gerekmez.)", parent=master):
-        CeremonyDownloadDialog(master, key, ceremony.url_of(cfg, key), use)
+        open_download(master, key, ceremony.url_of(cfg, key), use)
 
 
 def confirm_start(master, app, key) -> bool:

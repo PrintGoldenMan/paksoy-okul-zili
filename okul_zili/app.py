@@ -60,11 +60,13 @@ class App:
         self._calendar_checked = None
         if self.cfg.get("watchdog", True) != system.watchdog_installed():
             threading.Thread(target=system.set_watchdog, args=(self.cfg.get("watchdog", True),), daemon=True).start()
-        elif system.IS_LINUX and self.cfg.get("watchdog", True) and system.watchdog_supported():
-            # Program dosyası taşınmış olabilir (ör. kurulumdan sonra): bekçi yeni yolu kullansın.
-            threading.Thread(target=system.set_watchdog, args=(True,), daemon=True).start()
-        if system.IS_LINUX and self.cfg.get("autostart"):
-            autostart.set_enabled(True)   # otomatik başlatma dosyası programın güncel yolunu göstersin
+        elif self.cfg.get("watchdog", True) and system.watchdog_supported() and \
+                (system.IS_LINUX or "--oz-watchdog" not in sys.argv):
+            # Program dosyası taşınmış ya da güncellenmiş olabilir: bekçi yeni yolu kullansın. Windows'ta
+            # bekçinin açtığı program görevin içinde çalışır; görev o sırada yeniden kurulmaz.
+            threading.Thread(target=system.refresh_watchdog, daemon=True).start()
+        if self.cfg.get("autostart"):
+            autostart.refresh()   # otomatik başlatma kaydı programın güncel yolunu göstersin
 
     def _save_quietly(self):
         try:
@@ -138,7 +140,11 @@ class App:
     # pencere kaydedilince eski değerlerle ezilmemeleri için güncel halleri korunur.
     RUNTIME_KEYS = ("auto_ring", "skip_date", "skip_today", "short_day")
 
-    def apply_config(self, new_cfg, keep_runtime=False):
+    def apply_config(self, new_cfg, keep_runtime=False, base=None):
+        """base: ayarlar penceresi açılırken alınan kopya. Verilirse pencere açıkken başka yerden yapılan
+        değişiklikler (ana ekran, MEB takvimi, kütüphane, değişen ses) pencerenin eski kopyasıyla ezilmez."""
+        if base is not None:
+            new_cfg = config.merge_changes(base, new_cfg, self.cfg)
         if keep_runtime:
             for key in self.RUNTIME_KEYS:
                 new_cfg[key] = self.cfg.get(key, new_cfg.get(key))

@@ -1,12 +1,14 @@
 """Ders saatlerinden günlük zil listesini ve o anki durumu hesaplar."""
 
 import datetime as dt
+import logging
 from dataclasses import dataclass, field
 
 from . import rotation
 from .config import BELL_NAMES, ring_seconds
 from .turkish import capitalize_first, ordinal_word
 
+log = logging.getLogger(__name__)
 
 def parse_hm(text: str) -> int:
     """'08:30' -> gece yarısından itibaren dakika. Hatalı biçimde ValueError verir."""
@@ -38,6 +40,7 @@ class BellEvent:
     extra: dict = field(default_factory=dict)
     off: str = ""        # boş değilse zil çalmaz: "Kapalı" veya "Bugün kapalı"
     shift: int = 1       # ikili öğretimde 1 = sabahçı, 2 = öğlenci
+    index: int = 0       # ek zillerde listedeki sırası (aynı dakikadaki iki ek zil ayrı tutulsun)
 
     @property
     def bell_id(self) -> str:
@@ -52,6 +55,8 @@ class BellEvent:
 
     @property
     def key(self) -> str:
+        if self.kind == "ek":
+            return f"{self.minute}-ek-{self.index}-{self.label}"
         return f"{self.minute}-{self.kind}-{self.shift}-{self.lesson}-{self.label}"
 
 
@@ -274,22 +279,25 @@ def events_for_weekday(cfg: dict, weekday: int) -> list:
 
 def extra_events(cfg: dict, weekday: int) -> list:
     out = []
-    for e in cfg.get("extra_bells", []):
-        if not e.get("enabled", True) or weekday not in e.get("days", []):
-            continue
+    for i, e in enumerate(cfg.get("extra_bells", [])):
         try:
-            minute = parse_hm(e["time"])
-        except (KeyError, ValueError):
-            continue
-        text = _fill(e.get("text", ""), 0, minute)
-        out.append(BellEvent(
-            minute=minute, kind="ek", label=e.get("label") or "Ek Zil", note="Ek zil",
-            sound=e.get("sound", ""), text=text,
-            tts=bool(text) and cfg["tts"].get("enabled", False),
-            # «Sonuna kadar çal» seçiliyse süre sınırı yok (None): ses ya da seçilen bölümü bir kez tam çalar.
-            duration=None if e.get("full") else ring_seconds(e.get("duration")),
-            volume=int(e.get("volume", 100)), extra=e,
-        ))
+            if not e.get("enabled", True) or weekday not in e.get("days", []):
+                continue
+            try:
+                minute = parse_hm(e["time"])
+            except (KeyError, ValueError):
+                continue
+            text = _fill(e.get("text") or "", 0, minute)
+            out.append(BellEvent(
+                minute=minute, kind="ek", label=e.get("label") or "Ek Zil", note="Ek zil",
+                sound=e.get("sound") or "", text=text,
+                tts=bool(text) and cfg["tts"].get("enabled", False),
+                # «Sonuna kadar çal» seçiliyse süre sınırı yok (None): ses ya da seçilen bölümü bir kez tam çalar.
+                duration=None if e.get("full") else ring_seconds(e.get("duration")),
+                volume=int(e.get("volume", 100)), extra=e, index=i,
+            ))
+        except Exception:  # noqa: BLE001 - bozuk bir ek zil yüzünden günün bütün zilleri bozulmasın
+            log.exception("Ek zil yok sayıldı (ayarı bozuk): %s", e)
     return out
 
 
