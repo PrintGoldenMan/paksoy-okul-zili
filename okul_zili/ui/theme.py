@@ -37,10 +37,33 @@ BELL_HOVER = {
 }
 
 
+LINUX_FONTS = ("Noto Sans", "Ubuntu", "Cantarell", "Inter", "DejaVu Sans", "Liberation Sans", "FreeSans")
+
+
+def _linux_font():
+    """Linux'ta customtkinter'ın varsayılan yazı tipi (Roboto) çoğunlukla yüklü değildir; yüklü olan
+    ilk okunaklı yazı tipi seçilir (Lubuntu: Noto Sans). Bulunamazsa None (varsayılan kalır)."""
+    import shutil
+    import subprocess
+    import sys
+    if not sys.platform.startswith("linux") or not shutil.which("fc-list"):
+        return None
+    for family in LINUX_FONTS:
+        try:
+            if subprocess.run(["fc-list", "-q", family], timeout=5).returncode == 0:
+                return family
+        except (OSError, subprocess.SubprocessError):
+            return None
+    return None
+
+
 def apply_overrides():
     """customtkinter'ın varsayılan renklerini okunaklı olacak şekilde değiştirir.
     set_default_color_theme() çağrısından sonra, pencereler oluşturulmadan önce çağrılmalıdır."""
     t = ctk.ThemeManager.theme
+    family = _linux_font()
+    if family:
+        t["CTkFont"]["family"] = family
     seg = t["CTkSegmentedButton"]
     seg["fg_color"] = ("#5f6b7a", "#3a4048")
     seg["unselected_color"] = ("#5f6b7a", "#3a4048")      # beyaz yazı ile yeterli karşıtlık

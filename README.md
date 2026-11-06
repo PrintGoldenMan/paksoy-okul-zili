@@ -138,10 +138,41 @@ Kurulum sihirbazındaki **Lise** şablonu (tekli öğretim, 8 ders, 40 dk ders, 
 Kurulum sırasında «Bilgisayar açılınca otomatik başlasın» seçeneğini işaretli bırakın.
 Kurulum gerektirmeyen **`OkulZili-Tasinabilir-….exe`** de aynı sayfadadır.
 
+## Kurulum (Linux: Lubuntu, Ubuntu, Mint, Debian…)
+
+[**Sürümler (Releases)**](../../releases/latest) sayfasından **`OkulZili-Linux-x86_64-….tar.gz`** dosyasını
+indirip açın. Açılan klasörde bir uçbirim (terminal) açıp şunu yazın (yönetici izni gerekmez):
+
+```sh
+sh kur.sh            # kurar ve uygulama menüsüne ekler (Eğitim → Okul Zili)
+sh kur.sh --kaldir   # kaldırır (ayarlar ve sesler silinmez)
+```
+
+Kurmadan denemek için klasördeki `./okulzili` dosyasını çalıştırmanız yeterlidir. Paket Ubuntu 24.04'te
+derlenir; **Lubuntu/Ubuntu 24.04, 26.04** ve aynı ya da daha yeni sistemlerde Python kurmadan çalışır.
+
+Linux'ta farklı olanlar:
+
+| Özellik | Linux'ta nasıl? |
+|---|---|
+| Otomatik başlatma | `~/.config/autostart/okulzili.desktop` (LXQt, GNOME, KDE, XFCE) |
+| Kapanırsa yeniden açma (bekçi) | systemd kullanıcı zamanlayıcısı `okulzili-bekci.timer` (5 dakikada bir) |
+| Okul saatlerinde uyku engeli | `systemd-inhibit` (program kapanınca, çökse bile engel kalkar) |
+| Ses kapalı/kısık uyarısı | PipeWire (`wpctl`) ya da PulseAudio (`pactl`) |
+| Pencereyi kapatınca | Program görev çubuğuna küçülür; tamamen kapatmak için sağ alttaki **«⏻ Programı kapat»** |
+| İnternetsiz sesli anons | `espeak-ng` (Türkçe sesi var): `sudo apt install espeak-ng` |
+| «Ses ayarlarını aç» düğmesi | `pavucontrol-qt` / `pavucontrol` |
+| Güncelleme | «Güncelleme var» düğmesi yeni paketi indirip programı yeniler ve yeniden açar |
+| Veriler | `~/.local/share/OkulZili` |
+
+Kaynak koddan çalıştırmak için: `python3 -m venv .venv && .venv/bin/pip install -r requirements.txt &&
+.venv/bin/python main.py` (Ubuntu'da önce `sudo apt install python3-venv python3-tk`).
+
 ### Yeni sürüm yayınlama (geliştiriciler için)
 
 `okul_zili/__init__.py` içindeki `__version__` değerini artırıp aynı numarayla bir etiket gönderin
-(ör. `git tag v1.0.1 && git push origin v1.0.1`). GitHub Actions kurulum programını Windows'ta derler,
+(ör. `git tag v1.0.1 && git push origin v1.0.1`). GitHub Actions kurulum programını Windows'ta, Linux paketini
+Ubuntu'da derler,
 testleri ve açılış denetimini çalıştırır ve sürümü otomatik olarak yayınlar (`.github/workflows/release.yml`).
 
 ### Kendiniz derlemek isterseniz: tek dosya (.exe)
@@ -161,12 +192,13 @@ Python kuruluysa **`baslat.bat`** dosyasına çift tıklayın. İlk açılışta
 - Program okul saatlerinde bilgisayarın uykuya geçmesini kendisi engeller; yine de bilgisayarın kapanmadığından
   emin olun. Program yalnızca açıkken zil çalabilir.
 - Sesli anonslar ilk kez internet bağlantısıyla hazırlanır ve bilgisayara kaydedilir. Sonra internet
-  olmadan da çalar. İnternet hiç yoksa Uzman düzeyde «Windows sesleri» motoru seçilebilir. Türkçe
-  telaffuz için Windows'a Türkçe konuşma paketi yüklü olmalıdır.
+  olmadan da çalar. İnternet hiç yoksa Uzman düzeyde «Bilgisayardaki sesler» motoru seçilebilir. Türkçe
+  telaffuz için Windows'a Türkçe konuşma paketi, Linux'a `espeak-ng` yüklü olmalıdır.
 
 ## Veriler
 
-Ayarlar, ses kütüphanesi (`kutuphane`), anons önbelleği ve kayıtlar `%APPDATA%\OkulZili` klasöründe tutulur.
+Ayarlar, ses kütüphanesi (`kutuphane`), anons önbelleği ve kayıtlar `%APPDATA%\OkulZili` (Linux'ta
+`~/.local/share/OkulZili`) klasöründe tutulur.
 Programın yanına `tasinabilir.txt` adlı boş bir dosya koyarsanız veriler programın yanındaki
 `veriler` klasörüne yazılır (USB bellekte taşımak için).
 

@@ -4,6 +4,7 @@ Yeni bir sürüm varsa ana ekranda «Güncelleme var» düğmesi görünür. «G
   * Kurulumla yüklenmiş programda: yeni kurulum dosyası indirilir, program kapanır, kurulum sessizce
     çalışıp programı yeniden açar.
   * Taşınabilir (tek dosya) programda: yeni .exe indirilir, eskisinin yerine geçer ve açılır.
+  * Linux'ta: yeni sürümün .tar.gz paketindeki program dosyası eskisinin yerine yazılır ve program yeniden açılır.
   * Kaynak koddan çalışırken: sürüm sayfası tarayıcıda açılır.
 """
 
@@ -11,6 +12,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -33,10 +35,15 @@ def version_tuple(v: str):
     return tuple(int(x) for x in re.findall(r"\d+", v or "")[:4]) or (0,)
 
 
+IS_LINUX = sys.platform.startswith("linux")
+
+
 def install_kind() -> str:
-    """"installer" (Program Files / kullanıcı klasörüne kurulmuş), "portable" ya da "source"."""
+    """"installer" (Program Files / kullanıcı klasörüne kurulmuş), "portable", "linux" ya da "source"."""
     if not getattr(sys, "frozen", False):
         return "source"
+    if IS_LINUX:
+        return "linux"
     exe = Path(sys.executable)
     if any(exe.parent.glob("unins*.exe")):
         return "installer"
@@ -57,8 +64,12 @@ def check_latest(timeout=15):
     installer = next((u for n, u in assets.items() if n.startswith("OkulZili-Kurulum") and n.endswith(".exe")), None)
     portable = next((u for n, u in assets.items() if n.startswith("OkulZili-Tasinabilir") and n.endswith(".exe")),
                     None)
+    import platform
+    arch = "aarch64" if platform.machine().lower() in ("arm64", "aarch64") else "x86_64"
+    linux = next((u for n, u in assets.items() if n.startswith(f"OkulZili-Linux-{arch}") and n.endswith(".tar.gz")),
+                 None)
     return {"version": version, "page": data.get("html_url"), "notes": data.get("body") or "",
-            "installer": installer, "portable": portable}
+            "installer": installer, "portable": portable, "linux": linux}
 
 
 class UpdateChecker:
@@ -123,6 +134,8 @@ def prepare_and_launch(info, progress=None):
     """Güncellemeyi indirir ve program kapandıktan sonra çalışacak şekilde başlatır.
     True dönerse çağıran program hemen kapanmalıdır."""
     kind = install_kind()
+    if kind == "linux":
+        return _prepare_linux(info, progress)
     if os.name != "nt" or kind == "source" or not (info.get("installer") or info.get("portable")):
         webbrowser.open(info.get("page") or f"https://github.com/{REPO}/releases/latest")
         return False
@@ -150,6 +163,37 @@ def prepare_and_launch(info, progress=None):
     mark_updating()
     log.info("Güncelleme başlatılıyor: %s", info["version"])
     subprocess.Popen(["cmd", "/c", command], creationflags=NO_WINDOW, close_fds=True)
+    return True
+
+
+def _prepare_linux(info, progress=None):
+    """Linux: paketteki «okulzili» dosyası çalışan programın yerine yazılır (Linux, çalışan dosyanın yerine
+    yenisinin konmasına izin verir) ve program yeni sürümle yeniden açılır."""
+    import tarfile
+    current = Path(sys.executable).resolve()
+    if not info.get("linux") or not os.access(current.parent, os.W_OK):
+        # Program yazılamayan bir yere kurulmuş (ör. /opt): sürüm sayfası açılır.
+        webbrowser.open(info.get("page") or f"https://github.com/{REPO}/releases/latest")
+        return False
+    tmp = Path(tempfile.mkdtemp(prefix="okulzili_guncelleme_"))
+    archive = tmp / "paket.tar.gz"
+    _download(info["linux"], archive, progress)
+    new = current.with_name(current.name + ".yeni")
+    with tarfile.open(archive, "r:gz") as tar:
+        member = next((m for m in tar.getmembers() if m.isfile() and Path(m.name).name == "okulzili"), None)
+        if member is None:
+            raise OSError("Güncelleme paketinde program dosyası bulunamadı")
+        with tar.extractfile(member) as src, open(new, "wb") as dst:
+            shutil.copyfileobj(src, dst)
+    if new.stat().st_size < 1_000_000:
+        new.unlink(missing_ok=True)
+        raise OSError("İndirilen program dosyası eksik görünüyor")
+    new.chmod(0o755)
+    new.replace(current)
+    mark_updating()
+    log.info("Güncelleme kuruldu, program yeniden açılıyor: %s", info["version"])
+    # Yeni süreç, bu program kapanıp tek kopya kilidini bırakana kadar bekler (--oz-restart).
+    subprocess.Popen([str(current), "--oz-restart"], start_new_session=True, close_fds=True)
     return True
 
 

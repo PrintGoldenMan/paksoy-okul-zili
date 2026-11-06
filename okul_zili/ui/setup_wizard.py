@@ -217,7 +217,7 @@ class SetupWizard(ctk.CTkToplevel):
             auto.configure(state="disabled")
         self._card("Zil sesleri", "Program kendi zil sesiyle gelmez. Kurulumdan sonra ana ekrandaki "
                                       "«🎵 Kütüphane» düğmesiyle YouTube'dan ya da bilgisayardan zil sesi ekleyin. "
-                                      "Ses seçilene kadar ziller Windows uyarı sesiyle çalar.")
+                                      "Ses seçilene kadar ziller uyarı sesiyle çalar.")
         self._card("Ayar düzeyi", "Kurulumdan sonra ayarların ne kadar ayrıntılı görüneceğini seçeceksiniz.")
 
     # -- gezinme --------------------------------------------------------------------------

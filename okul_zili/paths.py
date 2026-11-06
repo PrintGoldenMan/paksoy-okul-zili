@@ -12,8 +12,11 @@ def data_dir() -> Path:
         root = base / "veriler"
     elif os.name == "nt" and os.environ.get("APPDATA"):
         root = Path(os.environ["APPDATA"]) / "OkulZili"
+    elif (Path.home() / ".okul_zili").exists():
+        root = Path.home() / ".okul_zili"   # önceki sürümlerin Linux/macOS klasörü
     else:
-        root = Path.home() / ".okul_zili"
+        # Linux: XDG standardı (~/.local/share/OkulZili)
+        root = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share") / "OkulZili"
     root.mkdir(parents=True, exist_ok=True)
     return root
 

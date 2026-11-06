@@ -542,9 +542,11 @@ class SettingsWindow(ctk.CTkToplevel):
         cb = ctk.CTkCheckBox(b, text="Bilgisayar açılınca program otomatik başlasın (önerilir)", variable=auto_var)
         cb.grid(row=0, column=0, columnspan=3, sticky="w", pady=4)
         if not autostart.supported():
-            cb.configure(state="disabled", text=cb.cget("text") + " – yalnızca Windows'ta")
+            cb.configure(state="disabled", text=cb.cget("text") + " – bu sistemde desteklenmiyor")
         tray_var = ctk.BooleanVar(value=cfg.get("tray_on_close", True))
-        ctk.CTkCheckBox(b, text="Pencere kapatılınca program saatin yanındaki simgede çalışmaya devam etsin (önerilir)",
+        ctk.CTkCheckBox(b, text=("Pencere kapatılınca program görev çubuğuna küçülüp çalışmaya devam etsin "
+                                 "(önerilir)") if system.IS_LINUX else
+                        "Pencere kapatılınca program saatin yanındaki simgede çalışmaya devam etsin (önerilir)",
                         variable=tray_var).grid(row=1, column=0, columnspan=3, sticky="w", pady=4)
 
         self._hint(f, "Ders saatlerini veya zil seslerini değiştirmek için yukarıdan «Basit» düzeyini seçin.")
@@ -580,10 +582,12 @@ class SettingsWindow(ctk.CTkToplevel):
         cb = ctk.CTkCheckBox(b, text="Bilgisayar açılınca program otomatik başlasın (önerilir)", variable=auto_var)
         cb.grid(row=0, column=0, columnspan=3, sticky="w", pady=4)
         if not autostart.supported():
-            cb.configure(state="disabled", text=cb.cget("text") + " – yalnızca Windows'ta")
+            cb.configure(state="disabled", text=cb.cget("text") + " – bu sistemde desteklenmiyor")
         toggles = [
-            ("tray_on_close", "Pencere kapatılınca program kapanmasın, saatin yanındaki simgede (sistem tepsisi) "
-                              "çalışmaya devam etsin (önerilir)", True),
+            ("tray_on_close", ("Pencere kapatılınca program kapanmasın, görev çubuğuna küçülüp çalışmaya devam "
+                               "etsin (önerilir)") if system.IS_LINUX else
+                              ("Pencere kapatılınca program kapanmasın, saatin yanındaki simgede (sistem tepsisi) "
+                               "çalışmaya devam etsin (önerilir)"), True),
             ("watchdog", "Program beklenmedik şekilde kapanırsa 5 dakika içinde kendiliğinden yeniden açılsın "
                          "(önerilir)", system.watchdog_supported()),
             ("keep_awake", "Okul saatlerinde bilgisayar uyku moduna geçmesin (önerilir)", True),
@@ -595,7 +599,7 @@ class SettingsWindow(ctk.CTkToplevel):
             box = ctk.CTkCheckBox(b, text=text, variable=var)
             box.grid(row=r, column=0, columnspan=3, sticky="w", pady=4)
             if not supported:
-                box.configure(state="disabled", text=text + " – yalnızca kurulu Windows programında")
+                box.configure(state="disabled", text=text + " – yalnızca kurulu programda")
             toggle_vars[key] = var
             r += 1
         self._hint(b, "Program tamamen kapatılmak istenirse saatin yanındaki zil simgesine sağ tıklayıp "
@@ -1249,7 +1253,7 @@ class SettingsWindow(ctk.CTkToplevel):
             off_voices = [("", "Otomatik (Türkçe ses varsa)")]
             off_menu = ctk.CTkOptionMenu(b, values=[n for _, n in off_voices], width=380)
             off_menu.set(off_voices[0][1])
-            labeled_row(b, 4, "Windows sesi", off_menu)
+            labeled_row(b, 4, "Bilgisayardaki ses", off_menu)
 
             def load_voices():
                 found = tts.offline_voices()
@@ -1259,7 +1263,9 @@ class SettingsWindow(ctk.CTkToplevel):
                     if vid == tc.get("offline_voice", ""):
                         off_menu.set(n)
                 if not found:
-                    messagebox.showinfo("Windows sesleri", "Bu bilgisayarda Windows sesi bulunamadı.", parent=self)
+                    messagebox.showinfo("Bilgisayardaki sesler", "Bu bilgisayarda yüklü ses bulunamadı." +
+                                        ("\n\nLinux'ta: sudo apt install espeak-ng" if system.IS_LINUX else ""),
+                                        parent=self)
             ctk.CTkButton(b, text="Sesleri listele", width=120, command=load_voices).grid(row=4, column=2, padx=8)
 
             def clear():

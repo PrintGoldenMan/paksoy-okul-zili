@@ -22,7 +22,7 @@ log = logging.getLogger(__name__)
 
 class MainWindow(ctk.CTk):
     def __init__(self, app):
-        super().__init__()
+        super().__init__(className="OkulZili")   # Linux: WM_CLASS, masaüstü dosyasıyla eşleşir
         self.app = app
         self.title(f"{APP_NAME} – {app.cfg['school_name']}")
         fit_to_screen(self, 1200, 760)
@@ -197,7 +197,7 @@ class MainWindow(ctk.CTk):
             if missing:
                 danger = False
                 self._banner_kind = "sound"
-                text = (f"🎵  Zil sesi seçilmedi: {', '.join(missing)} – şimdilik Windows uyarı sesi çalacak")
+                text = (f"🎵  Zil sesi seçilmedi: {', '.join(missing)} – şimdilik uyarı sesi çalacak")
                 btn = "Kütüphaneyi aç"
             else:
                 text = None
@@ -225,10 +225,15 @@ class MainWindow(ctk.CTk):
             self.flash("✓  Ders saatleri normale döndü")
             return
         if kind == "volume":
-            system.open_sound_settings()
+            if not system.open_sound_settings():
+                messagebox.showinfo("Ses ayarları", "Ses ayarları programı açılamadı. Ekranın sağ altındaki "
+                                                    "hoparlör simgesinden sesi açın.", parent=self)
             return
         if kind == "clock":
-            system.open_time_settings()
+            if not system.open_time_settings():
+                messagebox.showinfo("Saat ayarı", "Saat ayarları açılamadı. Uçbirimde (terminal) şu komut saati "
+                                                  "internetten otomatik ayarlar:\n\nsudo timedatectl set-ntp true",
+                                    parent=self)
             self.app.clock.check_now()
             return
         if kind == "auto":
@@ -357,6 +362,11 @@ class MainWindow(ctk.CTk):
         ctk.CTkButton(bar, text="ⓘ  Hakkında", width=96, height=24, font=theme.font(12), fg_color="transparent",
                       hover_color=theme.ROW_ALT, text_color=theme.MUTED,
                       command=self.open_credits).grid(row=0, column=1, sticky="e")
+        if system.IS_LINUX:
+            # Linux'ta pencereyi kapatmak programı küçültür; programı tamamen kapatmanın yolu bu düğmedir.
+            ctk.CTkButton(bar, text="⏻  Programı kapat", width=130, height=24, font=theme.font(12),
+                          fg_color="transparent", hover_color=theme.ROW_ALT, text_color=theme.MUTED,
+                          command=self._confirm_quit).grid(row=0, column=2, sticky="e", padx=(4, 0))
 
     # -- güncelleme ---------------------------------------------------------
 
@@ -770,6 +780,15 @@ class MainWindow(ctk.CTk):
 
     def _on_close(self):
         tray = self.app.tray
+        if system.IS_LINUX and self.app.cfg.get("tray_on_close", True):
+            # Linux masaüstlerinin çoğu (ör. Lubuntu/LXQt) bu tür tepsi simgesini göstermeyebilir; gizlenen
+            # pencereye geri dönülemezdi. Pencere görev çubuğuna küçülür, program çalışmaya devam eder.
+            self.iconify()
+            if not getattr(self, "_tray_hint_shown", False):
+                self._tray_hint_shown = True
+                self.after(300, lambda: self.flash("Okul Zili görev çubuğunda çalışmaya devam ediyor. Kapatmak "
+                                                   "için «⏻ Programı kapat».", seconds=10))
+            return
         if self.app.cfg.get("tray_on_close", True) and tray is not None and tray.available:
             # Pencere gizlenir; program ve ziller çalışmaya devam eder.
             self.withdraw()

@@ -4,14 +4,17 @@
   * "edge"    : Microsoft Edge doğal sesleri (Emel / Ahmet). İnternet gerekir, ancak
                 üretilen anonslar önbelleğe kaydedildiği için bir kez üretildikten sonra
                 internet olmadan da çalar.
-  * "offline" : Windows'ta yüklü sesler (pyttsx3). İnternet gerekmez; bilgisayarda Türkçe
-                ses paketi yoksa Türkçe telaffuz düzgün olmayabilir.
+  * "offline" : Bilgisayarda yüklü sesler. İnternet gerekmez. Windows'ta pyttsx3 (Türkçe ses paketi
+                yoksa telaffuz düzgün olmayabilir), Linux'ta espeak-ng (Türkçe sesi vardır).
 """
 
 import asyncio
 import hashlib
 import logging
 import os
+import shutil
+import subprocess
+import sys
 import threading
 import time
 
@@ -24,7 +27,12 @@ EDGE_VOICES = {
     "tr-TR-AhmetNeural": "Ahmet (Erkek)",
 }
 ENGINES = {"edge": "Doğal ses (internet ile üretilir, önbelleğe alınır)",
-           "offline": "Windows sesleri (internetsiz)"}
+           "offline": "Bilgisayardaki sesler (internetsiz)"}
+IS_LINUX = sys.platform.startswith("linux")
+
+
+def _espeak():
+    return shutil.which("espeak-ng") or shutil.which("espeak")
 
 _lock = threading.Lock()
 # Doğal ses (internet) başarısız olursa bu süre boyunca yeniden denenmez.
@@ -61,13 +69,15 @@ def _edge(text: str, tts_cfg: dict, out):
 
 def offline_voices() -> list:
     """[(kimlik, ad)] - Türkçe sesler başta olacak şekilde."""
+    if IS_LINUX:
+        return [("tr", "eSpeak – Türkçe")] if _espeak() else []
     try:
         import pyttsx3
         engine = pyttsx3.init()
         voices = [(v.id, v.name) for v in engine.getProperty("voices")]
         engine.stop()
     except Exception as exc:  # noqa: BLE001 - sürücü hataları çeşitli olabilir
-        log.warning("Windows sesleri okunamadı: %s", exc)
+        log.warning("Bilgisayardaki sesler okunamadı: %s", exc)
         return []
     voices.sort(key=lambda v: 0 if _is_turkish(*v) else 1)
     return voices
@@ -79,6 +89,9 @@ def _is_turkish(vid: str, name: str) -> bool:
 
 
 def _offline(text: str, tts_cfg: dict, out):
+    if IS_LINUX:
+        _espeak_to_file(text, tts_cfg, out)
+        return
     import pyttsx3
 
     engine = pyttsx3.init()
@@ -97,7 +110,21 @@ def _offline(text: str, tts_cfg: dict, out):
     engine.runAndWait()
     engine.stop()
     if not tmp.exists() or tmp.stat().st_size == 0:
-        raise RuntimeError("Windows sesi ile anons üretilemedi")
+        raise RuntimeError("Bilgisayardaki ses ile anons üretilemedi")
+    tmp.replace(out)
+
+
+def _espeak_to_file(text, tts_cfg, out):
+    """Linux: espeak-ng ile Türkçe anons (paket: espeak-ng; Ubuntu'da çoğunlukla yüklüdür)."""
+    exe = _espeak()
+    if not exe:
+        raise RuntimeError("espeak-ng yüklü değil (sudo apt install espeak-ng)")
+    rate = int(160 * (1 + int(tts_cfg.get("rate", 0)) / 100))
+    tmp = out.with_suffix(".part.wav")
+    subprocess.run([exe, "-v", "tr", "-s", str(max(80, min(400, rate))), "-w", str(tmp), "--", text],
+                   check=True, capture_output=True, timeout=60)
+    if not tmp.exists() or tmp.stat().st_size == 0:
+        raise RuntimeError("espeak-ng ile anons üretilemedi")
     tmp.replace(out)
 
 

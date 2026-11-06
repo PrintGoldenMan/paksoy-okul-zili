@@ -5,6 +5,7 @@
 |---|---|
 | **OkulZili-Kurulum-….exe** | **Önerilen.** Programı bilgisayara kurar, Başlat menüsüne ve isteğe bağlı masaüstüne kısayol ekler, bilgisayar açılınca otomatik başlatabilir. Denetim Masası'ndan kaldırılabilir. |
 | OkulZili-Tasinabilir-….exe | Kurulum gerektirmez; çift tıklayınca çalışır (USB bellekten kullanım için). |
+| OkulZili-Linux-x86_64-….tar.gz | **Linux** (Lubuntu, Ubuntu, Mint…): paketi açıp `sh kur.sh`. |
 
 ### Kurulum
 1. **OkulZili-Kurulum-….exe** dosyasını indirip çift tıklayın.
@@ -30,7 +31,13 @@ Her hafta (ya da her gün / her ay) farklı bir şarkı çalması için Ayarlar 
 Ses seçilmemiş zil sessiz kalmaz, Windows uyarı sesi çalar; ana ekranda sarı uyarı görünür.
 Oynatma listesi bağlantısı yapıştırılırsa program iki kez uyarır.
 
+### Linux (Lubuntu, Ubuntu, Mint…)
+**OkulZili-Linux-x86_64-….tar.gz** dosyasını indirip açın; klasörde uçbirimde `sh kur.sh` yazın (yönetici izni
+gerekmez). Program uygulama menüsüne eklenir: Eğitim → Okul Zili. Ayrıntılar paketteki BENIOKU.txt dosyasında.
+
 ### Bu sürümde yeni (1.4.0)
+- **Linux desteği** (Lubuntu 26.04 ve diğerleri): hazır paket, otomatik başlatma, uyku engeli, kapanırsa yeniden
+  açma, ses düzeyi uyarısı, internetsiz Türkçe anons (espeak-ng), kendini güncelleme.
 - **Tören düğmeleri:** Ana ekranda **«İstiklal Marşı»** ve **«Saygı Duruşu + İstiklal Marşı»**. İlk basışta ses
   internetten bir kez indirilir; sonra internet gerekmez.
 - Tören sürerken ziller çalmaz; zamanı gelen zil tören bitince birkaç saniye sonra çalar. Başlatmadan önce sorulur,

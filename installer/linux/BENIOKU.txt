@@ -1,0 +1,25 @@
+OKUL ZİLİ – LİNUX
+=================
+
+Kurulum (yönetici izni gerekmez):
+  1. Bu klasörde bir uçbirim (terminal) açın. (Dosya yöneticisinde klasöre sağ tıklayın →
+     «Uçbirimde aç» / «Open in Terminal».)
+  2. Şunu yazın:   sh kur.sh
+  3. Program uygulama menüsüne eklenir: Eğitim → Okul Zili.
+
+Kurmadan denemek için:  ./okulzili
+
+Kaldırmak için:  sh kur.sh --kaldir
+
+Önerilen paketler (Lubuntu/Ubuntu'da çoğu zaten yüklüdür):
+  sudo apt install espeak-ng pavucontrol-qt
+  - espeak-ng: internet yokken Türkçe sesli anons
+  - pavucontrol-qt: «Ses ayarlarını aç» düğmesi
+
+Notlar:
+  * Pencereyi kapatmak programı görev çubuğuna küçültür; ziller çalmaya devam eder.
+    Programı tamamen kapatmak için ana ekranın sağ altındaki «⏻ Programı kapat».
+  * Bilgisayar açılınca otomatik başlatma ve «kapanırsa yeniden aç» (bekçi) Ayarlar → Genel'den açılır.
+  * Okul saatlerinde bilgisayar uykuya geçmez (systemd-inhibit). Ekran koruyucu/kilit ekranı
+    zilleri etkilemez.
+  * Ayarlar ve sesler: ~/.local/share/OkulZili

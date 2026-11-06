@@ -13,6 +13,16 @@ from . import paths
 
 log = logging.getLogger(__name__)
 
+# Linux'taki X11 tepsi altyapısı (pystray _xorg) başlığı Latin-1 olarak yazar: Latin-1'de olmayan
+# harfler (ı, ş, ğ, «–») hataya yol açar, en yakın harfle değiştirilir.
+_LATIN1 = str.maketrans({"–": "-", "—": "-", "ı": "i", "İ": "I", "ş": "s", "Ş": "S", "ğ": "g", "Ğ": "G"})
+
+
+def _safe_title(text, backend):
+    if backend.endswith("_xorg"):
+        return text.translate(_LATIN1).encode("latin-1", "replace").decode("latin-1")
+    return text
+
 
 class Tray:
     def __init__(self):
@@ -30,7 +40,9 @@ class Tray:
                 pystray.Menu.SEPARATOR,
                 pystray.MenuItem("Programı kapat (ziller çalmaz)", lambda: self.commands.put("quit")),
             )
-            self.icon = pystray.Icon("OkulZili", image, "Okul Zili – ziller çalışıyor", menu)
+            self._backend = pystray.Icon.__module__
+            self.icon = pystray.Icon("OkulZili", image, _safe_title("Okul Zili – ziller çalışıyor", self._backend),
+                                     menu)
             if hasattr(self.icon, "run_detached"):
                 self.icon.run_detached()
             else:
@@ -49,7 +61,7 @@ class Tray:
     def set_tooltip(self, text):
         if self.icon is not None:
             try:
-                self.icon.title = text
+                self.icon.title = _safe_title(text, self._backend)
             except Exception:  # noqa: BLE001
                 pass
 

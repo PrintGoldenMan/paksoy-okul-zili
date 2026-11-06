@@ -1,5 +1,5 @@
-# Windows kurulum programını ve taşınabilir .exe'yi derleyip GitHub sürümü (Release) olarak yayınlar.
-# Tetikleme: "v1.2.3" biçiminde bir etiket (tag) gönderildiğinde ya da Actions sekmesinden
+# Windows kurulum programını, taşınabilir .exe'yi ve Linux paketini derleyip GitHub sürümü (Release)
+# olarak yayınlar. Tetikleme: "v1.2.3" biçiminde bir etiket (tag) gönderildiğinde ya da Actions sekmesinden
 # «Run workflow» ile elle (bu durumda etiket okul_zili/__init__.py içindeki sürümden oluşturulur).
 name: Windows sürümü
 
@@ -19,6 +19,8 @@ permissions:
 jobs:
   build:
     runs-on: windows-latest
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
     steps:
       - uses: actions/checkout@v4
 
@@ -108,14 +110,93 @@ jobs:
             dist/OkulZili-Kurulum-*.exe
             dist/OkulZili-Tasinabilir-*.exe
 
+  # Linux: tek dosyalık program + kurulum betiği (.tar.gz). Ubuntu 24.04'te derlenir; Lubuntu/Ubuntu
+  # 24.04 ve sonrası (26.04 dahil) ile aynı ya da daha yeni glibc'li dağıtımlarda çalışır.
+  linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Sürüm numarası
+        id: ver
+        run: echo "version=$(sed -n 's/^__version__ = "\(.*\)"/\1/p' okul_zili/__init__.py)" >> "$GITHUB_OUTPUT"
+
+      - name: Sistem paketleri (sanal ekran, renkli emoji yazı tipi – çizim denetimi için)
+        run: sudo apt-get update -q && sudo apt-get install -y -q xvfb xauth fonts-noto-color-emoji espeak-ng
+
+      - name: Bağımlılıkları kur
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+
+      - name: Testleri çalıştır
+        env:
+          SDL_AUDIODRIVER: dummy
+        run: python -m unittest discover -s tests -v
+
+      - name: Programı derle (tek dosya)
+        run: >
+          pyinstaller --noconfirm --clean --onefile --windowed --name okulzili
+          --add-data "assets:assets"
+          --collect-data customtkinter --collect-all edge_tts
+          --collect-all yt_dlp --collect-all yt_dlp_ejs --collect-all imageio_ffmpeg --copy-metadata yt-dlp
+          --collect-submodules pystray --hidden-import PIL.ImageTk --hidden-import PIL._tkinter_finder
+          main.py
+
+      - name: Öz denetim ve açılış denemesi (sanal ekranda)
+        env:
+          SDL_AUDIODRIVER: dummy
+        run: |
+          export HOME="$RUNNER_TEMP/home"; mkdir -p "$HOME"
+          xvfb-run -a ./dist/okulzili --oz-selftest "$RUNNER_TEMP/selftest.json" || { cat "$RUNNER_TEMP/selftest.json"; exit 1; }
+          cat "$RUNNER_TEMP/selftest.json"
+          # Programı 15 saniye çalıştırıp çökmeden açık kaldığını doğrula.
+          xvfb-run -a sh -c './dist/okulzili & pid=$!; sleep 15; kill -0 $pid || exit 1; kill $pid' \
+            || { cat "$HOME/.local/share/OkulZili/kayit.log"; echo "Program açıldıktan hemen sonra kapandı"; exit 1; }
+          tail -n 20 "$HOME/.local/share/OkulZili/kayit.log" || true
+
+      - name: Paketle
+        run: |
+          V=${{ steps.ver.outputs.version }}
+          P=OkulZili-Linux-$V
+          mkdir -p "$P"
+          cp dist/okulzili "$P/okulzili"
+          cp installer/linux/kur.sh installer/linux/BENIOKU.txt "$P/"
+          cp assets/okul_zili.png "$P/okulzili.png"
+          chmod +x "$P/okulzili" "$P/kur.sh"
+          tar czf "dist/OkulZili-Linux-x86_64-$V.tar.gz" "$P"
+          ls -la dist
+
+      - name: Derlenen dosyaları sakla
+        uses: actions/upload-artifact@v4
+        with:
+          name: OkulZili-Linux-${{ steps.ver.outputs.version }}
+          path: dist/OkulZili-Linux-*.tar.gz
+
+  publish:
+    needs: [build, linux]
+    if: github.ref_type == 'tag' || (github.event_name == 'workflow_dispatch' && inputs.publish)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
       - name: GitHub sürümü yayınla
-        if: github.ref_type == 'tag' || (github.event_name == 'workflow_dispatch' && inputs.publish)
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ steps.ver.outputs.version }}
+          tag_name: v${{ needs.build.outputs.version }}
           target_commitish: ${{ github.sha }}
-          name: Okul Zili ${{ steps.ver.outputs.version }}
+          name: Okul Zili ${{ needs.build.outputs.version }}
           body_path: installer/SURUM_NOTLARI.md
           files: |
             dist/OkulZili-Kurulum-*.exe
             dist/OkulZili-Tasinabilir-*.exe
+            dist/OkulZili-Linux-*.tar.gz

@@ -60,6 +60,11 @@ class App:
         self._calendar_checked = None
         if self.cfg.get("watchdog", True) != system.watchdog_installed():
             threading.Thread(target=system.set_watchdog, args=(self.cfg.get("watchdog", True),), daemon=True).start()
+        elif system.IS_LINUX and self.cfg.get("watchdog", True) and system.watchdog_supported():
+            # Program dosyası taşınmış olabilir (ör. kurulumdan sonra): bekçi yeni yolu kullansın.
+            threading.Thread(target=system.set_watchdog, args=(True,), daemon=True).start()
+        if system.IS_LINUX and self.cfg.get("autostart"):
+            autostart.set_enabled(True)   # otomatik başlatma dosyası programın güncel yolunu göstersin
 
     def _save_quietly(self):
         try:
@@ -190,6 +195,7 @@ class App:
         import subprocess
         log.info("Program yeniden başlatılıyor")
         self.player.stop()
+        system.set_keep_awake(False)
         flags = {"creationflags": 0x00000008 | 0x00000200} if os.name == "nt" else {"start_new_session": True}
         subprocess.Popen(launch_args("--oz-restart"), close_fds=True, **flags)
         _release_instance()
@@ -323,6 +329,24 @@ def self_test(out_path):
                     "okul_zili.ui.setup_wizard"):
             importlib.import_module(mod)
         result["ui_modules"] = True
+        if sys.platform.startswith("linux") and (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
+            # Eski libXft sürümleri renkli emojide X hatasıyla programı çökertir: emoji ve Türkçe harfler
+            # gerçekten çizdirilir; geliştirici resmi (PIL.ImageTk) de yüklenir.
+            import customtkinter as ctk
+            from PIL import Image
+            from .ui import theme
+            theme.apply_overrides()
+            root = ctk.CTk(className="OkulZili")
+            for text in ("🔔 🎵 ⏻ ⚙ ⏱ 🔊 🔇 📅 ✓ ⚠ ■ ⓘ ⬇ ▶", "İstiklal Marşı – ğüşıöçĞÜŞİÖÇ"):
+                ctk.CTkLabel(root, text=text, font=ctk.CTkFont(size=20)).pack()
+            image = Image.open(paths.resource("assets/gelistirici.png"))
+            pic = ctk.CTkImage(light_image=image, dark_image=image, size=(64, 64))
+            ctk.CTkLabel(root, text="", image=pic).pack()
+            for _ in range(5):
+                root.update()
+                time.sleep(0.1)
+            root.destroy()
+            result["linux_render"] = theme.ctk.ThemeManager.theme["CTkFont"]["family"]
         if os.name == "nt":
             importlib.import_module("PIL.ImageTk")           # geliştirici resmi (Hakkında)
             importlib.import_module("pystray._win32")       # sistem tepsisi
@@ -356,6 +380,12 @@ def main():
         if not _acquire_instance():
             return
         log.warning("Program kapalı bulundu; bekçi görevi yeniden başlattı")
+        if system.IS_LINUX:
+            # systemd zamanlayıcısı bu süreci bekler: program ayrı bir süreç olarak açılır, bekçi çıkar.
+            import subprocess
+            _release_instance()
+            subprocess.Popen(launch_args(), start_new_session=True, close_fds=True)
+            return
     elif not _acquire_instance(wait_seconds=20 if "--oz-restart" in sys.argv else 0):
         log.info("Program zaten açık; ikinci kopya kapatıldı")
         _show_already_running()

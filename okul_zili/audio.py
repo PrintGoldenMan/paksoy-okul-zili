@@ -263,14 +263,20 @@ class Player:
             self._announce(cfg, event.text, gen)
 
     def _warning_beep(self, duration, gen):
-        """Zil sesi yokken yedek olarak Windows'un kendi uyarı sesini, süre boyunca saniyede bir çalar."""
+        """Zil sesi yokken yedek uyarı sesi, süre boyunca saniyede bir çalar
+        (Windows: sistemin uyarı sesi; Linux: programın ürettiği kısa iki tonlu bip)."""
         end = time.monotonic() + (duration or 3.5)
         while time.monotonic() < end and not self._cancelled(gen):
             try:
                 import winsound
                 winsound.MessageBeep(winsound.MB_ICONEXCLAMATION)
             except ImportError:
-                sys.stdout and sys.stdout.write("\a")
+                beep = _beep_sound()
+                if beep is not None:
+                    beep.set_volume(max(0.05, min(1.0, self._get_config()["master_volume"] / 100)))
+                    beep.play()
+                elif sys.stdout:
+                    sys.stdout.write("\a")
             time.sleep(1.0)
 
     def _announce(self, cfg, text, gen):
@@ -348,14 +354,48 @@ class Player:
         return True
 
 
+_beep = None
+
+
+def _beep_sound():
+    """0,5 sn'lik iki tonlu uyarı sesi (880/660 Hz), bellekte üretilir; ses sistemi yoksa None."""
+    global _beep
+    if _beep is None and _ensure_mixer():
+        import array
+        import math
+        rate, channels = pygame.mixer.get_init()[0], pygame.mixer.get_init()[2]
+        samples = array.array("h")
+        n = int(rate * 0.5)
+        for i in range(n):
+            freq = 880 if i < n // 2 else 660
+            fade = min(1.0, i / 400, (n - i) / 400)          # tık sesi olmasın
+            v = int(12000 * fade * math.sin(2 * math.pi * freq * i / rate))
+            samples.extend([v] * channels)
+        try:
+            _beep = pygame.mixer.Sound(buffer=samples.tobytes())
+        except Exception as exc:  # noqa: BLE001
+            log.error("Uyarı sesi üretilemedi: %s", exc)
+    return _beep
+
+
 def _fallback_play(path) -> bool:
-    """pygame kullanılamıyorsa Windows'un yerleşik WAV oynatıcısı denenir."""
+    """pygame kullanılamıyorsa sistemin kendi oynatıcısı denenir (Windows: WAV, Linux: paplay/pw-play/aplay)."""
     try:
         import winsound
         if str(path).lower().endswith(".wav"):
             winsound.PlaySound(str(path), winsound.SND_FILENAME)
             return True
     except ImportError:
-        pass
+        import shutil
+        import subprocess
+        for player in ("pw-play", "paplay", "ffplay", "aplay"):
+            exe = shutil.which(player)
+            if exe and (player != "aplay" or str(path).lower().endswith(".wav")):
+                args = [exe, "-nodisp", "-autoexit", "-loglevel", "quiet", str(path)] if player == "ffplay" \
+                    else [exe, str(path)]
+                try:
+                    return subprocess.run(args, timeout=MAX_FULL_SECONDS, capture_output=True).returncode == 0
+                except (OSError, subprocess.SubprocessError):
+                    continue
     log.error("Ses çalınamadı (ses sistemi yok): %s", path)
     return False

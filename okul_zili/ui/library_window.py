@@ -246,7 +246,7 @@ class LibraryWindow(ctk.CTkToplevel):
         msg = f"«{item['title']}» kütüphaneden silinsin mi?"
         if used:
             msg += ("\n\nBu ses şu zillerde kullanılıyor: " + ", ".join(used) +
-                    ".\nSilinirse bu ziller için yeni bir ses seçilene kadar Windows uyarı sesi çalar.")
+                    ".\nSilinirse bu ziller için yeni bir ses seçilene kadar uyarı sesi çalar.")
         if not messagebox.askyesno("Sesi sil", msg, icon="warning", parent=self):
             return
         self.app.player.stop_preview()
