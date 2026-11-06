@@ -1,4 +1,5 @@
-"""toren_kaynak/ klasöründeki ses dosyalarından okul_zili/gomulu_sesler.py modülünü üretir.
+"""toren_kaynak/ klasöründeki ses dosyalarından okul_zili/gomulu_sesler.py modülünü üretir
+(tören sesleri ve programla gelen zil sesi «zil.<uzantı>»).
 
 Kullanım:  python tools/gomulu_sesler_olustur.py
 toren_kaynak/ içine «istiklal.<uzantı>» ve «saygi.<uzantı>» adıyla herhangi bir ses dosyası konur
@@ -21,7 +22,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 SRC = ROOT / "toren_kaynak"
 OUT = ROOT / "okul_zili" / "gomulu_sesler.py"
-NAMES = {"istiklal": "İstiklal Marşı", "saygi": "Saygı Duruşu + İstiklal Marşı"}
+NAMES = {"istiklal": "İstiklal Marşı", "saygi": "Saygı Duruşu + İstiklal Marşı", "zil": "Zil Sesi (Für Elise)"}
+# Yalnızca baştaki bölüm saklanacak sesler (saniye) ve zilin kendiliğinden durduğu yer («bitis», saniye):
+# Für Elise'in açılış cümlesi uzun tutulan La notasıyla biter; zil orada yumuşakça susar.
+EN_FAZLA = {"zil": 15.0}
+BITIS = {"zil": 10.0}
 CHUNK = 4000
 EXTS = (".opus", ".ogg", ".webm", ".m4a", ".mp3", ".wav", ".flac", ".aac")
 
@@ -45,10 +50,30 @@ EDGE_TRIM = ("silenceremove=start_periods=1:start_threshold=-50dB:start_silence=
              "silenceremove=start_periods=1:start_threshold=-50dB:start_silence=0.5,areverse")
 
 
-def to_opus(src, out):
+def to_opus(src, out, limit=None):
+    if limit:
+        # Baştaki sessizlik kırpılır, ilk «limit» saniye alınır, sonu yumuşakça kısılır.
+        af = (f"silenceremove=start_periods=1:start_threshold=-50dB:start_silence=0.05,"
+              f"atrim=0:{limit},afade=t=out:st={limit - 0.5}:d=0.5")
+    else:
+        af = EDGE_TRIM
     subprocess.run([ffmpeg(), "-hide_banner", "-loglevel", "error", "-y", "-i", str(src), "-vn", "-sn", "-dn",
-                    "-map_metadata", "-1", "-af", EDGE_TRIM, "-ar", "48000", "-ac", "2", "-c:a", "libopus",
+                    "-map_metadata", "-1", "-af", af, "-ar", "48000", "-ac", "2", "-c:a", "libopus",
                     "-b:a", "160k", "-f", "opus", str(out)], check=True)
+
+
+def existing():
+    """Kaynağı artık depoda olmayan sesler mevcut modülden olduğu gibi korunur."""
+    try:
+        sys.path.insert(0, str(ROOT))
+        from okul_zili import gomulu_sesler
+        return gomulu_sesler.SESLER
+    except ImportError:
+        return {}
+
+
+def has_source(key):
+    return any((SRC / f"{key}{ext}").exists() for ext in EXTS)
 
 
 def duration(path):
@@ -66,25 +91,34 @@ def main():
              "",
              "SESLER = {"]
     tmp = Path(tempfile.mkdtemp(prefix="gomulu_"))
+    old = existing()
     for key, name in NAMES.items():
-        path = tmp / f"{key}.opus"
-        to_opus(find_source(key), path)
-        data = path.read_bytes()
-        meta = json.loads((SRC / f"{key}.json").read_text(encoding="utf-8")) if (SRC / f"{key}.json").exists() else {}
-        b64 = base64.b64encode(data).decode("ascii")
+        if not has_source(key) and key in old:
+            info = old[key]
+            b64 = "".join(info["veri"])
+            fields = {k: v for k, v in info.items() if k != "veri"}
+            print(f"{key}: kaynak yok, mevcut ses korundu")
+        else:
+            path = tmp / f"{key}.opus"
+            to_opus(find_source(key), path, EN_FAZLA.get(key))
+            data = path.read_bytes()
+            meta_file = SRC / f"{key}.json"
+            meta = json.loads(meta_file.read_text(encoding="utf-8")) if meta_file.exists() else {}
+            b64 = base64.b64encode(data).decode("ascii")
+            fields = {"ad": name, "sure": duration(path), "kaynak": meta.get("webpage_url", ""),
+                      "baslik": meta.get("title", ""), "boyut": len(data),
+                      "sha256": hashlib.sha256(data).hexdigest()}
+            if key in BITIS:
+                fields["bitis"] = BITIS[key]
+            print(f"{key}: {len(data) / 1024:.0f} KB, {fields['sure']} sn")
         lines.append(f"    {key!r}: {{")
-        lines.append(f"        'ad': {name!r},")
-        lines.append(f"        'sure': {duration(path)!r},")
-        lines.append(f"        'kaynak': {meta.get('webpage_url', '')!r},")
-        lines.append(f"        'baslik': {meta.get('title', '')!r},")
-        lines.append(f"        'boyut': {len(data)},")
-        lines.append(f"        'sha256': {hashlib.sha256(data).hexdigest()!r},")
+        for field, value in fields.items():
+            lines.append(f"        {field!r}: {value!r},")
         lines.append("        'veri': (")
         for i in range(0, len(b64), CHUNK):
             lines.append(f"            '{b64[i:i + CHUNK]}'")
         lines.append("        ),")
         lines.append("    },")
-        print(f"{key}: {len(data) / 1024:.0f} KB, {duration(path)} sn")
     lines.append("}")
     OUT.write_text("\n".join(lines) + "\n", encoding="utf-8")
     print(f"Yazıldı: {OUT} ({OUT.stat().st_size / 1024 / 1024:.1f} MB)")

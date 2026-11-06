@@ -54,7 +54,9 @@ Linux: `OkulZili-Linux-x86_64-….tar.gz` ·
     seslerden bir öncekinden farklı biri rastgele seçilir ve dönem boyunca aynı kalır (program yeniden açılsa da).
     Haftalar pazartesi, aylar ayın 1'inde değişir. «Şimdi değiştir» ile hemen yeni bir ses seçilebilir.
   - Hem şarkı hem liste içeren YouTube bağlantılarında (`watch?v=…&list=…`) yalnızca o şarkı indirilir.
-  - Zil sesi seçilmemişse (ilk kurulumda olduğu gibi) zil sessiz kalmaz: uyarı sesi çalar ve ana ekranda
+  - **Hazır zil sesi:** Program, Für Elise'in açılış cümlesiyle gelir (ilk 15 saniyesi programa gömülü). Zil
+    yaklaşık 10 saniye çalar ve müzik cümlesi bittiği yerde yumuşakça susar; kütüphaneden başka ses seçilebilir.
+  - Seçilen ses silinmiş ya da bozuksa zil sessiz kalmaz: uyarı sesi çalar ve ana ekranda
     sarı uyarı görünür.
   - YouTube için gereken Deno çalıştırıcısı ilk YouTube indirmesinde bir kez otomatik indirilir (~40 MB).
     YouTube değiştiğinde Kütüphane penceresindeki **«yt-dlp'yi güncelle»** düğmesiyle indirici güncellenir.
@@ -86,6 +88,9 @@ Linux: `OkulZili-Linux-x86_64-….tar.gz` ·
 - **Kendiliğinden yeniden açılma:** Program beklenmedik şekilde kapanırsa 5 dakika içinde yeniden açılır
   (Windows: Görev Zamanlayıcı, Linux: systemd zamanlayıcısı). Bilerek kapatılan program açılmaz.
 - **Uyku engeli:** İlk zilden 30 dk önce ile son zilden 5 dk sonra arasında bilgisayar uykuya geçmez.
+- **Saati internetten al (isteğe bağlı, varsayılan kapalı):** Ziller bilgisayarın saati yerine internet saatine göre
+  çalar (SNTP, olmazsa web sunucusunun saati; 30 dakikada bir). Bilgisayarın saati değiştirilmez; internet yoksa son
+  alınan saatle devam edilir. Ana ekranın altında «🌐 İnternet saati» yazar.
 - **Denetimler:** Bilgisayarın sesi kapalı / çok kısıksa ya da hoparlör yoksa kırmızı uyarı; bilgisayar saati internet
   saatinden 1 dakikadan fazla farklıysa sarı uyarı (internet varsa).
 - **Kendini güncelleme:** Yeni sürüm çıkınca üstte «Güncelleme var» düğmesi görünür; «Güncelle» yeni sürümü indirir,
@@ -227,9 +232,10 @@ python -m unittest discover -s tests    # testleri çalıştırır
 | `okul_zili/audio.py` | Zil ve anonsları sırayla çalar (pygame) |
 | `okul_zili/sounds.py` | Zil sesi kimliklerini kütüphanedeki dosyalara çevirir |
 | `okul_zili/system.py` | Uyku engeli, ses düzeyi, internet saati, yeniden başlatma görevi (Windows ve Linux) |
+| `okul_zili/clock.py` | Programın saati: bilgisayar saati ya da (isteğe bağlı) internet saati |
 | `okul_zili/autostart.py` | Açılışta otomatik başlatma (Windows kayıt defteri / Linux autostart) |
 | `okul_zili/ceremony.py` | Tören düğmeleri (İstiklal Marşı, Saygı Duruşu + İstiklal Marşı) |
-| `okul_zili/gomulu_sesler.py` | Programla gelen tören sesleri (Opus, bayt olarak gömülü; `tools/` ile üretilir) |
+| `okul_zili/gomulu_sesler.py` | Programla gelen sesler: tören sesleri ve zil sesi (Opus, bayt olarak gömülü; `tools/` ile üretilir) |
 | `okul_zili/tray.py` | Sistem tepsisi simgesi |
 | `okul_zili/updater.py` | Programın kendini güncellemesi (GitHub sürümleri) |
 | `okul_zili/backup.py` | Tam yedek (ayarlar + sesler) |

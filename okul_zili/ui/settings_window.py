@@ -21,8 +21,8 @@ import sys
 import customtkinter as ctk
 from tkinter import filedialog, messagebox
 
-from .. import ISSUES_URL, __version__, autostart, backup, ceremony, config, library, meb_takvim, paths, rotation, schedule, sounds, system, tts
-from ..config import (BELL_NAMES, BELL_TYPES, DEFAULT_RING_SECONDS, LEVEL_DESCRIPTIONS, LEVEL_NAMES, LEVELS,
+from .. import ISSUES_URL, __version__, autostart, backup, ceremony, clock, config, library, meb_takvim, paths, rotation, schedule, sounds, system, tts
+from ..config import (BELL_NAMES, BELL_TYPES, DEFAULT_BELL_SECONDS, DEFAULT_RING_SECONDS, LEVEL_DESCRIPTIONS, LEVEL_NAMES, LEVELS,
                       MAX_RING_SECONDS, MIN_RING_SECONDS, ring_seconds)
 from ..schedule import fmt_hm, parse_hm
 from ..turkish import DAYS, capitalize_first, ordinal_word
@@ -191,7 +191,7 @@ class RotationPanel(ctk.CTkFrame):
 
     def _period_key_now(self):
         period = next(k for k, v in rotation.PERIODS.items() if v == self.period.get())
-        return period, rotation.period_key(period, dt.date.today())
+        return period, rotation.period_key(period, clock.today())
 
     def _period_changed(self, _value):
         self._update_current()
@@ -621,8 +621,16 @@ class SettingsWindow(ctk.CTkToplevel):
             var = ctk.BooleanVar(value=cfg.get(key, True))
             ctk.CTkCheckBox(b, text=text, variable=var).grid(row=r, column=0, columnspan=3, sticky="w", pady=4)
             toggle_vars[key] = var
+        net_var = ctk.BooleanVar(value=cfg.get("use_network_time", False))
+        ctk.CTkCheckBox(b, text="Saati internetten al: ziller bilgisayarın saatine göre değil, internet saatine göre "
+                                "çalsın", variable=net_var).grid(row=len(checks), column=0, columnspan=3, sticky="w",
+                                                                  pady=4)
+        toggle_vars["use_network_time"] = net_var
+        self._hint(b, "Bilgisayarın saati yanlışsa (ör. pili bitmiş eski bilgisayar) işe yarar. Saat 30 dakikada bir "
+                      "internetten alınır; internet kesilirse son alınan saatle devam edilir, hiç alınamadıysa "
+                      "bilgisayarın saati kullanılır. Bilgisayarın saati değiştirilmez.", row=len(checks) + 1)
         status = ctk.CTkLabel(b, text="", text_color=theme.MUTED, justify="left", anchor="w")
-        status.grid(row=len(checks), column=0, columnspan=2, sticky="w", pady=(8, 0))
+        status.grid(row=len(checks) + 2, column=0, columnspan=2, sticky="w", pady=(8, 0))
 
         def show_status():
             clock = self.app.clock.offset
@@ -632,6 +640,8 @@ class SettingsWindow(ctk.CTkToplevel):
                 clock_text = f"Saat: doğru (internet saatiyle fark {abs(clock):.1f} sn)".replace(".", ",")
             else:
                 clock_text = f"Saat: {abs(clock):.0f} saniye {'geri' if clock > 0 else 'ileri'}!"
+            if clock is not None and cfg.get("use_network_time"):
+                clock_text += " – program internet saatini kullanıyor"
             latest = self.app.updates.latest
             ver = f"Sürüm: {__version__}" + (f" – yeni sürüm var: {latest['version']}" if latest else "")
             status.configure(text=f"{clock_text}\n{ver}")
@@ -643,7 +653,7 @@ class SettingsWindow(ctk.CTkToplevel):
             status.configure(text="Denetleniyor…")
             self.after(6000, lambda: self.winfo_exists() and show_status())
         ctk.CTkButton(b, text="Şimdi denetle", width=120, command=check_now).grid(
-            row=len(checks), column=2, sticky="e", padx=8)
+            row=len(checks) + 2, column=2, sticky="e", padx=8)
 
         b = self._card(f, "Tam Yedek", "Ayarlar ve kütüphanedeki bütün sesler tek bir dosyaya kaydedilir. Yeni bir "
                                        "bilgisayara geçerken ya da bilgisayar sıfırlanınca her şey bu dosyadan "
@@ -991,8 +1001,9 @@ class SettingsWindow(ctk.CTkToplevel):
                 widgets.update(volume=v)
             pickers[kind] = widgets
         self._hint(f, f"Çalma süresi {_sec(MIN_RING_SECONDS)}–{_sec(MAX_RING_SECONDS)} saniye arasında olabilir "
-                      f"(varsayılan {_sec(DEFAULT_RING_SECONDS)}). Ses bu süreden kısaysa başa sarılarak tekrarlanır, "
-                      "uzunsa süre dolunca yumuşakça kısılarak durur. Anons, zil bittikten sonra okunur.\n"
+                      f"(programla gelen zil sesiyle {_sec(DEFAULT_BELL_SECONDS)}: müzik cümlesi bitince susar). Ses "
+                      "bu süreden kısaysa başa sarılarak tekrarlanır, uzunsa süre dolunca yumuşakça kısılarak durur. "
+                      "Anons, zil bittikten sonra okunur.\n"
                       "İpucu: Öğrenci ve öğretmen zillerine farklı sesler seçerseniz kimin sınıfa "
                       "gireceği kolayca anlaşılır.")
 
@@ -1149,7 +1160,7 @@ class SettingsWindow(ctk.CTkToplevel):
         refresh_empty()
 
         def add_meb():
-            today = dt.date.today()
+            today = clock.today()
             cal = meb_takvim.calendar_for(today)
             if not cal:
                 messagebox.showinfo("MEB çalışma takvimi",
@@ -1173,7 +1184,7 @@ class SettingsWindow(ctk.CTkToplevel):
                                 "Kaydetmek için «Kaydet»e basın.", parent=self)
 
         def add_official():
-            today = dt.date.today()
+            today = clock.today()
             y = today.year if today.month >= 8 else today.year - 1
             existing = {s.get() for _, _, s, _, _, _ in rows}
             for name, d in (("Cumhuriyet Bayramı", dt.date(y, 10, 29)), ("Yılbaşı", dt.date(y + 1, 1, 1)),
@@ -1765,7 +1776,7 @@ class SettingsWindow(ctk.CTkToplevel):
             return
         path = filedialog.asksaveasfilename(
             parent=self, title="Tam yedeği kaydet", defaultextension=".zip",
-            initialfile=f"OkulZili_yedek_{dt.date.today().isoformat()}.zip", filetypes=[("Okul Zili yedeği", "*.zip")])
+            initialfile=f"OkulZili_yedek_{clock.today().isoformat()}.zip", filetypes=[("Okul Zili yedeği", "*.zip")])
         if not path:
             return
         try:
@@ -1850,7 +1861,10 @@ class SettingsWindow(ctk.CTkToplevel):
             return
         bells = self.cfg["bells"]
         same = bells["ogrenci"]["sound"] == bells["ogretmen"]["sound"]
-        if same and bells["ogrenci"]["sound"] not in (sounds.NO_SOUND, "") and not sounds.is_missing(bells["ogrenci"]["sound"]):
+        # Programla gelen zil sesi varsayılan olarak bütün zillerde ortaktır; yalnızca bilerek aynı ses
+        # seçildiyse sorulur.
+        if same and bells["ogrenci"]["sound"] not in (sounds.NO_SOUND, "", config.DEFAULT_BELL_SOUND) \
+                and not sounds.is_missing(bells["ogrenci"]["sound"]):
             if not messagebox.askyesno(
                     "Aynı zil sesi", "Öğrenci zili ile öğretmen zili aynı sesi kullanıyor; ayırt etmek zor "
                                      "olabilir.\n\nYine de kaydedilsin mi?", parent=self):

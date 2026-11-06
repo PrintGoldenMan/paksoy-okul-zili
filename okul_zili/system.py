@@ -249,10 +249,11 @@ def internet_clock_offset():
 class ClockMonitor:
     """Bilgisayar saatini birkaç saatte bir internet saatiyle karşılaştırır (internet varsa)."""
 
-    def __init__(self, interval_hours=3, first_delay=20):
+    def __init__(self, interval_hours=3, first_delay=20, network_time=lambda: False):
         self.offset = None          # en son ölçülen fark (saniye) ya da None
         self.checked_at = None
         self._interval = interval_hours * 3600
+        self._network_time = network_time   # internet saati kullanılıyorsa 30 dakikada bir ölçülür
         self._first_delay = first_delay
         self._wake = threading.Event()
         threading.Thread(target=self._run, name="saat-denetimi", daemon=True).start()
@@ -266,11 +267,14 @@ class ClockMonitor:
             self._wake.clear()
             offset = internet_clock_offset()
             if offset is not None:
+                from . import clock
                 self.offset = offset
                 self.checked_at = time.time()
+                clock.set_offset(offset)
                 if abs(offset) > 60:
                     log.warning("Bilgisayar saati internet saatinden %.0f saniye farklı", offset)
-            self._wake.wait(self._interval if offset is not None else 900)
+            interval = 1800 if self._network_time() else self._interval
+            self._wake.wait(min(interval, 900) if offset is None else interval)
 
 
 def open_time_settings() -> bool:

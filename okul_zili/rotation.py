@@ -9,7 +9,7 @@ kaydedilir; böylece program yeniden başlasa da dönem boyunca aynı ses çalar
 import datetime as dt
 import random
 
-from . import library, sounds
+from . import clock, library, sounds
 
 PERIODS = {"day": "Her gün", "week": "Her hafta", "month": "Her ay"}
 PERIOD_THIS = {"day": "Bugünün", "week": "Bu haftanın", "month": "Bu ayın"}
@@ -67,7 +67,7 @@ def update(bell: dict, date: dt.date, force: bool = False, rng=random) -> bool:
 
 
 def update_all(cfg: dict, date: dt.date = None, rng=random) -> bool:
-    date = date or dt.date.today()
+    date = date or clock.today()
     changed = False
     for bell in cfg.get("bells", {}).values():
         changed |= update(bell, date, rng=rng)

@@ -93,7 +93,7 @@ def is_missing(sound_id: str) -> bool:
 def length_seconds(sound_id: str):
     info = _builtin_info(sound_id)
     if info:
-        return info.get("sure")
+        return info.get("bitis") or info.get("sure")   # zil sesi «bitis»te kendiliğinden susar
     if sound_id and sound_id.startswith(library.PREFIX):
         item = library.get_library().get(sound_id[len(library.PREFIX):])
         return item.get("duration") if item else None
@@ -101,7 +101,11 @@ def length_seconds(sound_id: str):
 
 
 def part(sound_id: str):
-    """Kütüphanede bu ses için seçilmiş «zilde çalınacak bölüm»: (başlangıç, bitiş ya da None)."""
+    """Kütüphanede bu ses için seçilmiş «zilde çalınacak bölüm»: (başlangıç, bitiş ya da None).
+    Programla gelen zil sesinde bitiş, müzik cümlesinin bittiği yerdir (gomulu_sesler.py «bitis»)."""
+    info = _builtin_info(sound_id)
+    if info:
+        return 0.0, info.get("bitis")
     if sound_id and sound_id.startswith(library.PREFIX):
         item = library.get_library().get(sound_id[len(library.PREFIX):])
         if item:

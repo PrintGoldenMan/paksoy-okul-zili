@@ -85,7 +85,7 @@ class RotationTests(unittest.TestCase):
         teacher = next(e for e in events if e.kind == "ogretmen")
         self.assertEqual(teacher.sound, rotation.effective_sound(self.bell))
         student = next(e for e in events if e.kind == "ogrenci")
-        self.assertEqual(student.sound, "")   # öğrenci zilinde değişen ses kapalı
+        self.assertEqual(student.sound, self.cfg["bells"]["ogrenci"]["sound"])   # öğrenci zilinde değişen ses kapalı
 
 
 if __name__ == "__main__":

@@ -15,8 +15,9 @@
 4. Program ilk açılışta okulun adını, türünü ve ders saatlerini sorar; ardından ayar düzeyini seçersiniz
    (emin değilseniz **«Basit»**).
 
-### Zil seslerini ekleyin (ilk kurulumda)
-Program kendi zil sesiyle gelmez; sesleri siz seçersiniz:
+### Zil sesleri
+Program hazır bir zil sesiyle gelir (Für Elise'in açılış cümlesi; zil yaklaşık 10 saniye çalar ve cümle bitince
+susar). Başka bir ses kullanmak isterseniz:
 1. Ana ekrandaki **«🎵 Kütüphane»** düğmesine basın.
 2. YouTube'daki şarkının / zil sesinin bağlantısını yapıştırıp **«İndir»**e basın
    (ya da **«Bilgisayardan ekle…»** ile USB bellekteki bir dosyayı seçin).
@@ -35,7 +36,15 @@ Oynatma listesi bağlantısı yapıştırılırsa program iki kez uyarır.
 **OkulZili-Linux-x86_64-….tar.gz** dosyasını indirip açın; klasörde uçbirimde `sh kur.sh` yazın (yönetici izni
 gerekmez). Program uygulama menüsüne eklenir: Eğitim → Okul Zili. Ayrıntılar paketteki BENIOKU.txt dosyasında.
 
-### Bu sürümde yeni (1.4.2) – hata düzeltmeleri
+### Bu sürümde yeni (1.5.0)
+- **Hazır zil sesi:** Program artık kendi zil sesiyle gelir: Beethoven'ın Für Elise'inin açılış cümlesi (programa
+  yalnızca ilk 15 saniyesi gömülüdür). Zil yaklaşık 10 saniye çalar ve müzik cümlesi bittiği yerde yumuşakça susar.
+  Sesi hiç seçilmemiş zillere kendiliğinden verilir; kendi seçtiğiniz seslere dokunulmaz.
+- **Saati internetten al** (Ayarlar → Genel → Denetimler, varsayılan kapalı): açılırsa ziller bilgisayarın saatine
+  göre değil internet saatine göre çalar; bilgisayarın saati yanlış olsa da ziller doğru zamanda çalar. Saat 30
+  dakikada bir alınır; internet yoksa son alınan saatle, hiç alınamadıysa bilgisayar saatiyle devam edilir.
+
+### 1.4.2 – hata düzeltmeleri
 - **Ayarlar → Zil Sesleri açılmıyordu** (1.4.0 ve 1.4.1); düzeltildi.
 - **Windows'ta güncelleme:** «Güncelle»den sonra kurulum / yeni program bazı bilgisayarlarda başlamayabiliyordu;
   güncelleme artık ayrı bir komut dosyasıyla güvenilir şekilde başlatılır. Yarıda kesilen indirme kurulmaz.

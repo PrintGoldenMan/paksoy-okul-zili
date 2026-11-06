@@ -5,7 +5,7 @@ import datetime as dt
 import logging
 import threading
 
-from . import schedule, tts
+from . import clock, schedule, tts
 
 log = logging.getLogger(__name__)
 
@@ -80,11 +80,11 @@ class BellScheduler:
             self._dirty = True
 
     def today_events(self):
-        self._refresh(dt.datetime.now())
+        self._refresh(clock.now())
         return list(self._events)
 
     def next_event(self, now=None):
-        now = now or dt.datetime.now()
+        now = now or clock.now()
         self._refresh(now)
         m = now.hour * 60 + now.minute
         for e in self._events:
@@ -120,7 +120,7 @@ class BellScheduler:
         stop = threading.Event()
         while not stop.wait(0.5):
             try:
-                self._tick(dt.datetime.now())
+                self._tick(clock.now())
             except Exception:  # noqa: BLE001 - zamanlayıcı asla durmamalı
                 log.exception("Zamanlayıcı hatası")
 

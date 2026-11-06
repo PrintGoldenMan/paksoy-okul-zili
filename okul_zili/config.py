@@ -30,6 +30,9 @@ LEVEL_DESCRIPTIONS = {
 # Zilin kaç saniye çalacağı. Ses daha kısaysa başa sarılarak tekrarlanır, daha uzunsa
 # süre dolunca yumuşakça kısılarak durdurulur.
 DEFAULT_RING_SECONDS = 3.5
+# Programla gelen zil sesi (Für Elise'in açılış cümlesi): zil bu kadar çalar ve cümle bitince susar.
+DEFAULT_BELL_SOUND = "gomulu:zil"
+DEFAULT_BELL_SECONDS = 10.0
 MIN_RING_SECONDS = 1.5
 MAX_RING_SECONDS = 30.0
 
@@ -85,18 +88,18 @@ DEFAULTS = {
     "day_overrides": {},
     "bells": {
         "ogrenci": {
-            "sound": "", "duration": DEFAULT_RING_SECONDS, "volume": 100, "tts": True,
+            "sound": DEFAULT_BELL_SOUND, "duration": DEFAULT_BELL_SECONDS, "volume": 100, "tts": True,
             "rotation": _rotation_default(),
             "text": "Sevgili öğrenciler, {ders_sira} ders başlamak üzere. "
                     "Lütfen sınıflarınıza geçiniz.",
         },
         "ogretmen": {
-            "sound": "", "duration": DEFAULT_RING_SECONDS, "volume": 100, "tts": True,
+            "sound": DEFAULT_BELL_SOUND, "duration": DEFAULT_BELL_SECONDS, "volume": 100, "tts": True,
             "rotation": _rotation_default(),
             "text": "Sayın öğretmenlerimiz, {ders_sira} ders başlamıştır.",
         },
         "cikis": {
-            "sound": "", "duration": DEFAULT_RING_SECONDS, "volume": 100, "tts": True,
+            "sound": DEFAULT_BELL_SOUND, "duration": DEFAULT_BELL_SECONDS, "volume": 100, "tts": True,
             "rotation": _rotation_default(),
             "text": "{ders_sira} ders sona ermiştir. İyi teneffüsler.",
             "text_lunch": "Öğle arası başlamıştır. Afiyet olsun.",
@@ -130,6 +133,7 @@ DEFAULTS = {
     "keep_awake": True,          # okul saatlerinde bilgisayarın uykuya geçmesini engelle
     "check_updates": True,       # yeni sürüm çıkınca haber ver
     "check_clock": True,         # internet varsa bilgisayar saatini denetle
+    "use_network_time": False,   # ziller bilgisayar saati yerine internet saatine göre çalsın (clock.py)
     "check_volume": True,        # Windows sesi kapalı/çok kısıksa uyar
     "prepare_announcements": True,
     "skip_date": None,  # "Bugün zilleri kapat" seçildiğinde o günün tarihi
@@ -368,10 +372,17 @@ def _sanitize(cfg: dict) -> dict:
 
 
 def _migrate(cfg: dict) -> dict:
-    """Eski sürümlerdeki program içi hazır seslerin («builtin:…») yerini «seçilmedi» alır."""
+    """Eski sürümlerdeki program içi hazır seslerin («builtin:…») yerini «seçilmedi» alır. Sesi hiç
+    seçilmemiş (uyarı sesi çalan) zillere programla gelen zil sesi verilir; çalma süresi hiç
+    değiştirilmemişse (3,5 sn) zil sesinin kendi süresine çıkarılır ki müzik cümlesi yarıda kesilmesin."""
     for bell in list(cfg.get("bells", {}).values()) + list(cfg.get("extra_bells", [])):
         if isinstance(bell, dict) and str(bell.get("sound", "")).startswith("builtin:"):
             bell["sound"] = ""
+    for bell in (cfg.get("bells") or {}).values():
+        if isinstance(bell, dict) and bell.get("sound") == "":
+            bell["sound"] = DEFAULT_BELL_SOUND
+            if bell.get("duration") in (None, DEFAULT_RING_SECONDS):
+                bell["duration"] = DEFAULT_BELL_SECONDS
     return cfg
 
 

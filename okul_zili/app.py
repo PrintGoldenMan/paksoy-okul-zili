@@ -10,7 +10,7 @@ import time
 
 import customtkinter as ctk
 
-from . import APP_NAME, __version__, autostart, ceremony, config, meb_takvim, paths, rotation, sounds, system, updater
+from . import APP_NAME, __version__, autostart, ceremony, clock, config, meb_takvim, paths, rotation, sounds, system, updater
 from .audio import Player
 from .config import BELL_NAMES, ring_seconds
 from .scheduler import BellScheduler
@@ -54,7 +54,9 @@ class App:
         self.window = None
         self.tray = None
         self.volume = system.VolumeMonitor()
-        self.clock = system.ClockMonitor()
+        self.clock = system.ClockMonitor(network_time=lambda: self.cfg.get("use_network_time", False),
+                                         first_delay=3 if self.cfg.get("use_network_time") else 20)
+        clock.configure(self.cfg.get("use_network_time", False), on_jump=self.clock.check_now)
         self.updates = updater.UpdateChecker(lambda: self.cfg.get("check_updates", True))
         self.calendar = meb_takvim.CalendarUpdater()
         self._calendar_checked = None
@@ -154,6 +156,11 @@ class App:
                 if not ceremony.is_ready(new_cfg, key) and ceremony.is_ready(self.cfg, key):
                     new_cfg["ceremony"]["items"][key]["sound"] = ceremony.sound_of(self.cfg, key)
         self.cfg = new_cfg
+        if self.cfg.get("use_network_time", False) != clock.enabled():
+            clock.configure(self.cfg.get("use_network_time", False))
+            log.info("Saat kaynağı: %s", "internet saati" if clock.enabled() else "bilgisayar saati")
+            self.clock.check_now()
+            self.scheduler.reload()
         rotation.update_all(self.cfg)   # havuz değiştiyse ya da yeni açıldıysa bu dönemin sesini seç
         try:
             config.save(self.cfg)

@@ -79,11 +79,12 @@ class ScheduleTests(unittest.TestCase):
 
     def test_ring_duration_default_and_limits(self):
         events = schedule.events_for_date(self.cfg, MONDAY)
-        self.assertTrue(all(e.duration == 3.5 for e in events))
+        self.assertTrue(all(e.duration == config.DEFAULT_BELL_SECONDS for e in events))
         self.cfg["bells"]["ogretmen"]["duration"] = 99
         self.cfg["bells"]["ogrenci"]["duration"] = "7,5"
         events = schedule.events_for_date(self.cfg, MONDAY)
-        self.assertEqual({e.kind: e.duration for e in events}, {"ogrenci": 7.5, "ogretmen": 30.0, "cikis": 3.5})
+        self.assertEqual({e.kind: e.duration for e in events},
+                         {"ogrenci": 7.5, "ogretmen": 30.0, "cikis": config.DEFAULT_BELL_SECONDS})
         self.assertEqual(config.ring_seconds(0), 1.5)
         self.assertEqual(config.ring_seconds("1"), 1.5)
 

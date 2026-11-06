@@ -57,7 +57,8 @@ class LibraryTests(unittest.TestCase):
         cfg["bells"]["ogretmen"]["sound"] = "builtin:klasik"
         cfg["extra_bells"] = [{"sound": "builtin:gong"}]
         cfg = config._migrate(cfg)
-        self.assertEqual(cfg["bells"]["ogretmen"]["sound"], "")
+        # Eski hazır ses kaldırıldı: zil programla gelen zil sesine geçer, ek zil «seçilmedi» olur.
+        self.assertEqual(cfg["bells"]["ogretmen"]["sound"], config.DEFAULT_BELL_SOUND)
         self.assertEqual(cfg["extra_bells"][0]["sound"], "")
 
     def test_import_file_converts_to_opus(self):

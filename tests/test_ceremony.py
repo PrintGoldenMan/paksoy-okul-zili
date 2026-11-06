@@ -207,10 +207,37 @@ class ShippedSoundsTests(unittest.TestCase):
         import base64
         import hashlib
         from okul_zili import gomulu_sesler
-        self.assertEqual(set(gomulu_sesler.SESLER), set(ceremony.KEYS))
+        self.assertEqual(set(gomulu_sesler.SESLER), set(ceremony.KEYS) | {"zil"})
         for key, info in gomulu_sesler.SESLER.items():
             data = base64.b64decode("".join(info["veri"]))
             self.assertEqual(len(data), info["boyut"], key)
             self.assertEqual(hashlib.sha256(data).hexdigest(), info["sha256"], key)
             self.assertTrue(data.startswith(b"OggS"), key)   # Opus (Ogg kabı)
-            self.assertGreater(info["sure"], 30, key)
+            self.assertGreater(info["sure"], 30 if key in ceremony.KEYS else 5, key)
+
+
+class DefaultBellSoundTests(unittest.TestCase):
+    """Programla gelen zil sesi (Für Elise): varsayılan zil, cümle sonunda susar."""
+
+    def test_default_bells_use_embedded_sound(self):
+        from okul_zili import gomulu_sesler, sounds
+        cfg = config.default_config()
+        info = gomulu_sesler.SESLER["zil"]
+        self.assertLessEqual(info["sure"], 15.1)                     # yalnızca ilk 15 saniye saklanır
+        for kind in config.BELL_TYPES:
+            bell = cfg["bells"][kind]
+            self.assertEqual(bell["sound"], config.DEFAULT_BELL_SOUND)
+            self.assertEqual(bell["duration"], config.DEFAULT_BELL_SECONDS)
+        self.assertEqual(sounds.part(config.DEFAULT_BELL_SOUND), (0.0, info["bitis"]))
+        self.assertEqual(config.DEFAULT_BELL_SECONDS, info["bitis"])
+        self.assertEqual(sounds.length_seconds(config.DEFAULT_BELL_SOUND), info["bitis"])
+
+    def test_unset_bells_migrate_to_embedded_sound(self):
+        old = {"bells": {"ogrenci": {"sound": "", "duration": 3.5},
+                         "ogretmen": {"sound": "", "duration": 6.0},
+                         "cikis": {"sound": "lib:abc123", "duration": 3.5}}}
+        cfg = config._sanitize(config._migrate(config._merge(config.DEFAULTS, old)))
+        self.assertEqual(cfg["bells"]["ogrenci"]["sound"], config.DEFAULT_BELL_SOUND)
+        self.assertEqual(cfg["bells"]["ogrenci"]["duration"], config.DEFAULT_BELL_SECONDS)
+        self.assertEqual(cfg["bells"]["ogretmen"]["duration"], 6.0)   # elle ayarlanmış süre korunur
+        self.assertEqual(cfg["bells"]["cikis"], dict(cfg["bells"]["cikis"], sound="lib:abc123", duration=3.5))

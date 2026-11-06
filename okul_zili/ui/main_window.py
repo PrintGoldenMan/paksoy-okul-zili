@@ -1,6 +1,5 @@
 """Ana pencere: saat, sonraki zil, elle çalma düğmeleri ve günün zil çizelgesi."""
 
-import datetime as dt
 import logging
 import os
 import queue
@@ -10,7 +9,7 @@ import time
 import customtkinter as ctk
 from tkinter import messagebox
 
-from .. import APP_NAME, __version__, ceremony, config, paths, rotation, schedule, sounds, system, updater
+from .. import APP_NAME, __version__, ceremony, clock, config, paths, rotation, schedule, sounds, system, updater
 from ..config import BELL_NAMES, LEVEL_NAMES
 from ..turkish import long_date
 from . import theme
@@ -185,7 +184,9 @@ class MainWindow(ctk.CTk):
         elif self._volume_problem(cfg):
             text, btn = self._volume_problem(cfg), "Ses ayarlarını aç"
             self._banner_kind = "volume"
-        elif cfg.get("check_clock", True) and self.app.clock.offset is not None and abs(self.app.clock.offset) > 60:
+        elif cfg.get("check_clock", True) and not clock.network_active() and self.app.clock.offset is not None \
+                and abs(self.app.clock.offset) > 60:
+            # İnternet saati kullanılıyorsa bilgisayar saatinin yanlış olması zilleri etkilemez.
             off = self.app.clock.offset
             amount = f"{abs(off) / 60:.0f} dakika" if abs(off) >= 90 else f"{abs(off):.0f} saniye"
             text = (f"⏰  Bilgisayarın saati {amount} {'geri' if off > 0 else 'ileri'} – ziller yanlış zamanda "
@@ -381,7 +382,7 @@ class MainWindow(ctk.CTk):
         self._row_toggles = config.LEVELS.index(level) >= config.LEVELS.index("gelismis")
         self._apply_announce_visibility()
         self.auto_var.set(cfg.get("auto_ring", True))
-        self.skip_var.set(cfg.get("skip_date") == dt.date.today().isoformat())
+        self.skip_var.set(cfg.get("skip_date") == clock.today().isoformat())
         self._schedule_signature = None
         self._row_state = None
         self._tick(reschedule=False)
@@ -391,7 +392,7 @@ class MainWindow(ctk.CTk):
             w.destroy()
         self._row_widgets = []
         if not events:
-            today = dt.date.today()
+            today = clock.today()
             holiday = schedule.holiday_name(self.app.cfg, today)
             text = f"🎉  Bugün tatil: {holiday}" if holiday else "Bugün okul günü değil"
             text += "\nZil çalmayacak."
@@ -469,7 +470,7 @@ class MainWindow(ctk.CTk):
             pass
 
     def _tick(self, reschedule=True):
-        now = dt.datetime.now()
+        now = clock.now()
         if reschedule:
             # Önce bir sonraki güncellemeyi planla: bir hata olsa bile saat durmasın.
             self.after(1000 - now.microsecond // 1000 + 5, self._tick)
@@ -575,7 +576,7 @@ class MainWindow(ctk.CTk):
         """Durum çubuğunda kısa süreli bilgi gösterir (ör. «Ayarlar kaydedildi»)."""
         self._flash_text = text
         self._flash_until = time.monotonic() + seconds if text else 0.0
-        self._update_statusbar(self.app.cfg, dt.datetime.now())
+        self._update_statusbar(self.app.cfg, clock.now())
 
     def _update_statusbar(self, cfg, now):
         color = theme.MUTED
@@ -591,6 +592,10 @@ class MainWindow(ctk.CTk):
             text = "⚠  Ziller yalnızca bugün için kapalı. Yarın otomatik olarak açılır."
         else:
             text = f"✓  Program çalışıyor. Ziller otomatik çalacak.   ·   {APP_NAME} {__version__}"
+            if clock.network_active():
+                text += "   ·   🌐 İnternet saati"
+            elif clock.enabled():
+                text += "   ·   İnternet saati alınamadı, bilgisayar saati kullanılıyor"
         if text.startswith("⚠"):
             color = theme.DANGER
         if self.statusbar.cget("text") != text:
@@ -683,7 +688,7 @@ class MainWindow(ctk.CTk):
         self.app.update_config(auto_ring=bool(self.auto_var.get()))
 
     def _toggle_bell_today(self, event):
-        today = dt.date.today().isoformat()
+        today = clock.today().isoformat()
         skip = dict(self.app.cfg.get("skip_today") or {})
         ids = list(skip.get("ids", [])) if skip.get("date") == today else []
         if event.bell_id in ids:
@@ -698,7 +703,7 @@ class MainWindow(ctk.CTk):
                                        "olarak yeniden çalar.", icon="warning", parent=self):
             self.skip_var.set(False)
             return
-        self.app.update_config(skip_date=dt.date.today().isoformat() if self.skip_var.get() else None)
+        self.app.update_config(skip_date=clock.today().isoformat() if self.skip_var.get() else None)
 
     def open_setup_wizard(self):
         from .setup_wizard import SetupWizard
@@ -724,7 +729,7 @@ class MainWindow(ctk.CTk):
 
     def open_short_day(self):
         from .short_day import ShortDayDialog
-        if not schedule.is_school_day(self.app.cfg, dt.date.today()):
+        if not schedule.is_school_day(self.app.cfg, clock.today()):
             messagebox.showinfo("Kısaltılmış ders", "Bugün okul günü değil.", parent=self)
             return
         if getattr(self, "_short_day", None) is not None and self._short_day.winfo_exists():
@@ -826,7 +831,7 @@ class MainWindow(ctk.CTk):
             return
         nxt = self.app.scheduler.next_event()
         if nxt is not None:
-            now = dt.datetime.now()
+            now = clock.now()
             secs = nxt.minute * 60 - (now.hour * 3600 + now.minute * 60 + now.second)
             if 0 <= secs < 180:
                 messagebox.showinfo("Güncelleme", "Birkaç dakika içinde zil çalacak. Lütfen zil çaldıktan sonra "

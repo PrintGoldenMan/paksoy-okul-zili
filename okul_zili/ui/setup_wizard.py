@@ -1,11 +1,10 @@
 """İlk açılış kurulum sihirbazı: okulun adı, türü, tekli/ikili öğretim, ders saatleri ve son ayarlar."""
 
-import datetime as dt
 
 import customtkinter as ctk
 from tkinter import messagebox
 
-from .. import autostart, meb_takvim, schedule, templates
+from .. import autostart, clock, meb_takvim, schedule, templates
 from ..schedule import fmt_hm, parse_hm
 from . import theme
 from .widgets import Spin, fit_to_screen, labeled_row, time_entry
@@ -199,7 +198,7 @@ class SetupWizard(ctk.CTkToplevel):
         self._collect = collect
 
     def _page_finish(self):
-        today = dt.date.today()
+        today = clock.today()
         cal = meb_takvim.calendar_for(today)
         b = self._card("Son adım", "Bu ayarları daha sonra Ayarlar'dan değiştirebilirsiniz.")
         self.meb_var = ctk.BooleanVar(value=cal is not None)
@@ -215,9 +214,9 @@ class SetupWizard(ctk.CTkToplevel):
         auto.grid(row=1, column=0, sticky="w", pady=4)
         if not autostart.supported():
             auto.configure(state="disabled")
-        self._card("Zil sesleri", "Program kendi zil sesiyle gelmez. Kurulumdan sonra ana ekrandaki "
-                                      "«🎵 Kütüphane» düğmesiyle YouTube'dan ya da bilgisayardan zil sesi ekleyin. "
-                                      "Ses seçilene kadar ziller uyarı sesiyle çalar.")
+        self._card("Zil sesleri", "Program hazır bir zil sesiyle gelir (Für Elise'in açılış cümlesi, yaklaşık "
+                                      "10 saniye). İsterseniz kurulumdan sonra ana ekrandaki «🎵 Kütüphane» "
+                                      "düğmesiyle YouTube'dan ya da bilgisayardan başka sesler ekleyip seçebilirsiniz.")
         self._card("Ayar düzeyi", "Kurulumdan sonra ayarların ne kadar ayrıntılı görüneceğini seçeceksiniz.")
 
     # -- gezinme --------------------------------------------------------------------------
@@ -268,7 +267,7 @@ class SetupWizard(ctk.CTkToplevel):
                 second["timing"].update(self.data["timing2"])
         if self.meb_var.get():
             cfg["meb_auto"] = True
-            meb_takvim.apply_calendar(cfg, meb_takvim.school_year(dt.date.today()))
+            meb_takvim.apply_calendar(cfg, meb_takvim.school_year(clock.today()))
         cfg["autostart"] = bool(self.autostart_var.get())
         self.app.apply_config(cfg)
         self.destroy()

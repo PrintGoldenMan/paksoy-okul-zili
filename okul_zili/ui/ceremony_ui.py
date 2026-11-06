@@ -1,6 +1,5 @@
 """Tören düğmelerinin arayüz tarafı: ses yoksa indirme, başlatmadan önce sorma, uyarılar."""
 
-import datetime as dt
 import logging
 import queue
 import threading
@@ -8,7 +7,7 @@ import threading
 import customtkinter as ctk
 from tkinter import messagebox
 
-from .. import ceremony, downloader, library, sounds
+from .. import ceremony, clock, downloader, library, sounds
 from ..downloader import fmt_time
 from . import theme
 from .widgets import center_over
@@ -170,7 +169,7 @@ def confirm_start(master, app, key) -> bool:
 
 
 def _bells_during(app, seconds):
-    now = dt.datetime.now()
+    now = clock.now()
     sec = now.hour * 3600 + now.minute * 60 + now.second
     out = []
     for e in app.scheduler.today_events():

@@ -1,10 +1,9 @@
 """«Bugün kısaltılmış ders» penceresi: yalnızca bugün için ders süreleri kısaltılır."""
 
-import datetime as dt
 
 import customtkinter as ctk
 
-from .. import schedule
+from .. import clock, schedule
 from ..schedule import fmt_hm
 from . import theme
 from .widgets import Spin, center_over
@@ -19,7 +18,7 @@ class ShortDayDialog(ctk.CTkToplevel):
         self.configure(fg_color=theme.CARD_BG)
         self.transient(master)
         cfg = app.cfg
-        today = dt.date.today()
+        today = clock.today()
         self.weekday = today.weekday()
         # Kısaltma her zaman normal ders saatlerinden hesaplanır (bugün zaten kısaltılmışsa bile).
         self.base = dict(cfg, short_day={"date": None})
@@ -77,7 +76,7 @@ class ShortDayDialog(ctk.CTkToplevel):
 
     def _values(self):
         lunch = self.lunch.get() if self.has_lunch else None
-        return {"date": dt.date.today().isoformat(), "lesson_minutes": self.lesson.get(),
+        return {"date": clock.today().isoformat(), "lesson_minutes": self.lesson.get(),
                 "break_minutes": self.brk.get(), "lunch_minutes": lunch}
 
     def _update_preview(self):
