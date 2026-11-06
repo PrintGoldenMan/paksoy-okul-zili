@@ -61,6 +61,9 @@ class SoundPicker(ctk.CTkFrame):
             if seen[name] > 1:
                 name = f"{name} ({seen[name]})"
             opts.append((library.PREFIX + item["id"], name))
+        for key in sounds.builtin_sounds():   # programla gelen sesler (İstiklal Marşı vb.)
+            sid = sounds.BUILTIN_PREFIX + key
+            opts.append((sid, sounds.display_name(sid)))
         if self.allow_none:
             opts.append((sounds.NO_SOUND, sounds.NO_SOUND_NAME))
         if sounds.is_missing(self.sound_id):

@@ -1,6 +1,7 @@
 """Tören sesleri: «İstiklal Marşı» ve «Saygı Duruşu + İstiklal Marşı».
 
-Ana ekrandaki düğmeyle başlatılır. Tören sürerken zamanı gelen ziller çalmaz; bekletilir ve tören
+Ana ekrandaki düğmeyle başlatılır. Sesler programla birlikte gelir (gomulu_sesler.py, internet gerekmez);
+istenirse Ayarlar'dan internetten başka bir kayıt indirilip seçilebilir. Tören sürerken zamanı gelen ziller çalmaz; bekletilir ve tören
 bitince (birkaç saniye ara verilerek) yalnızca en son bekleyen zil çalar (scheduler.py).
 """
 
@@ -23,8 +24,14 @@ def item_cfg(cfg, key) -> dict:
     return (cfg.get("ceremony") or {}).get("items", {}).get(key) or {}
 
 
+def builtin_id(key):
+    """Programla gelen ses kimliği (gomulu_sesler.py içinde varsa)."""
+    return sounds.BUILTIN_PREFIX + key if key in sounds.builtin_sounds() else ""
+
+
 def sound_of(cfg, key) -> str:
-    return item_cfg(cfg, key).get("sound") or ""
+    """Seçilen ses; seçilmediyse programla gelen ses."""
+    return item_cfg(cfg, key).get("sound") or builtin_id(key)
 
 
 def url_of(cfg, key) -> str:

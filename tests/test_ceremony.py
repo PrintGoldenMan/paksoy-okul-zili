@@ -146,3 +146,54 @@ class ConfigTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class EmbeddedSoundTests(unittest.TestCase):
+    """Programla gelen (koda gömülü) sesler: ilk kullanımda çıkarılır, bozulursa yeniden çıkarılır."""
+
+    def setUp(self):
+        import base64
+        import hashlib
+        import tempfile
+        from okul_zili import sounds
+        self.sounds = sounds
+        self._home = tempfile.mkdtemp()
+        self._old = os.environ.get("HOME"), os.environ.get("APPDATA")
+        os.environ["HOME"] = os.environ["APPDATA"] = self._home
+        data = b"OggS" + bytes(range(256)) * 8
+        self.fake = {"istiklal": {"ad": "İstiklal Marşı", "sure": 88.5, "boyut": len(data),
+                                  "sha256": hashlib.sha256(data).hexdigest(),
+                                  "veri": (base64.b64encode(data).decode()[:100], base64.b64encode(data).decode()[100:])}}
+        self._orig = sounds.builtin_sounds
+        sounds.builtin_sounds = lambda: self.fake
+
+    def tearDown(self):
+        self.sounds.builtin_sounds = self._orig
+        for key, value in zip(("HOME", "APPDATA"), self._old):
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+    def test_extract_and_repair(self):
+        s = self.sounds
+        p = s.resolve("gomulu:istiklal")
+        self.assertEqual(p.stat().st_size, self.fake["istiklal"]["boyut"])
+        self.assertEqual(s.length_seconds("gomulu:istiklal"), 88.5)
+        self.assertEqual(s.display_name("gomulu:istiklal"), "İstiklal Marşı (programla gelen)")
+        p.write_bytes(b"bozuk")
+        self.assertEqual(s.resolve("gomulu:istiklal").stat().st_size, self.fake["istiklal"]["boyut"])
+        self.assertIsNone(s.resolve("gomulu:yok"))
+        self.assertTrue(s.is_missing("gomulu:yok"))
+
+    def test_corrupt_module_data_is_rejected(self):
+        self.fake["istiklal"]["sha256"] = "0" * 64
+        self.assertIsNone(self.sounds.resolve("gomulu:istiklal"))
+
+    def test_ceremony_defaults_to_embedded_sound(self):
+        cfg = config.default_config()
+        self.assertEqual(ceremony.sound_of(cfg, "istiklal"), "gomulu:istiklal")
+        self.assertTrue(ceremony.is_ready(cfg, "istiklal"))
+        self.assertEqual(ceremony.sound_of(cfg, "saygi"), "")   # bu ses gömülü değil: indirme önerilir
+        cfg["ceremony"]["items"]["istiklal"]["sound"] = "lib:baska"
+        self.assertEqual(ceremony.sound_of(cfg, "istiklal"), "lib:baska")

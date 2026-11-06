@@ -5,15 +5,66 @@ Ses kimlikleri:
   "none"          – zil sesi yok, yalnızca anons okunur
   ""              – henüz ses seçilmedi: zil sessiz kalmasın diye Windows uyarı sesi çalar
   "file:<yol>"    – eski sürümlerden kalan doğrudan dosya yolu
+  "gomulu:<ad>"   – programla gelen (koda bayt olarak gömülü) ses: İstiklal Marşı vb. (gomulu_sesler.py)
 """
 
+import base64
+import hashlib
+import logging
+import threading
 from pathlib import Path
 
-from . import library
+from . import library, paths
+
+log = logging.getLogger(__name__)
 
 NO_SOUND = "none"
 NO_SOUND_NAME = "(Zil sesi yok, yalnızca anons)"
 UNSET_NAME = "(Ses seçilmedi – uyarı sesi çalar)"
+BUILTIN_PREFIX = "gomulu:"
+_builtin_lock = threading.Lock()
+
+
+def builtin_sounds() -> dict:
+    """Programla gelen sesler: {ad: bilgi}. Gömülü ses modülü yoksa (ör. kaynak koddan çalışırken) boş."""
+    try:
+        from . import gomulu_sesler
+    except ImportError:
+        return {}
+    return gomulu_sesler.SESLER
+
+
+def _builtin_info(sound_id: str):
+    if sound_id and sound_id.startswith(BUILTIN_PREFIX):
+        return builtin_sounds().get(sound_id[len(BUILTIN_PREFIX):])
+    return None
+
+
+def builtin_path(key: str):
+    """Gömülü sesi ilk kullanımda veri klasörüne çıkarır (Opus) ve yolunu döndürür."""
+    info = builtin_sounds().get(key)
+    if not info:
+        return None
+    target = paths.sub_dir("gomulu") / f"{key}-{info['sha256'][:10]}.opus"
+    with _builtin_lock:
+        try:
+            if target.exists() and target.stat().st_size == info["boyut"]:
+                return target
+            data = base64.b64decode("".join(info["veri"]))
+            if hashlib.sha256(data).hexdigest() != info["sha256"]:
+                log.error("Gömülü ses bozuk: %s", key)
+                return None
+            part = target.with_suffix(".part")
+            part.write_bytes(data)
+            part.replace(target)
+            for old in target.parent.glob(f"{key}-*.opus"):   # önceki sürümlerin çıkardığı kopyalar
+                if old != target:
+                    old.unlink(missing_ok=True)
+            log.info("Gömülü ses çıkarıldı: %s", target.name)
+            return target
+        except OSError as exc:
+            log.error("Gömülü ses çıkarılamadı (%s): %s", key, exc)
+            return None
 
 
 def is_silent(sound_id: str) -> bool:
@@ -26,6 +77,8 @@ def resolve(sound_id: str):
         return None
     if sound_id.startswith(library.PREFIX):
         return library.get_library().path(sound_id[len(library.PREFIX):])
+    if sound_id.startswith(BUILTIN_PREFIX):
+        return builtin_path(sound_id[len(BUILTIN_PREFIX):])
     if sound_id.startswith("file:"):
         p = Path(sound_id.split(":", 1)[1])
         return p if p.exists() else None
@@ -38,6 +91,9 @@ def is_missing(sound_id: str) -> bool:
 
 
 def length_seconds(sound_id: str):
+    info = _builtin_info(sound_id)
+    if info:
+        return info.get("sure")
     if sound_id and sound_id.startswith(library.PREFIX):
         item = library.get_library().get(sound_id[len(library.PREFIX):])
         return item.get("duration") if item else None
@@ -64,6 +120,9 @@ def part(sound_id: str):
 def display_name(sound_id: str) -> str:
     if sound_id == NO_SOUND:
         return NO_SOUND_NAME
+    if sound_id and sound_id.startswith(BUILTIN_PREFIX):
+        info = _builtin_info(sound_id)
+        return f"{info['ad']} (programla gelen)" if info else "(Programla gelen ses bulunamadı)"
     if sound_id and sound_id.startswith(library.PREFIX):
         item = library.get_library().get(sound_id[len(library.PREFIX):])
         return item["title"] if item else "(Silinmiş ses – uyarı sesi çalar)"
