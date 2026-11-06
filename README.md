@@ -159,9 +159,17 @@ Kurulum gerektirmeyen **`OkulZili-Tasinabilir-….exe`** de aynı sayfadadır.
 indirip açın. Açılan klasörde bir uçbirim (terminal) açıp şunu yazın (yönetici izni gerekmez):
 
 ```sh
-sh kur.sh            # kurar ve uygulama menüsüne ekler (Eğitim → Okul Zili)
-sh kur.sh --kaldir   # kaldırır (ayarlar ve sesler silinmez)
+bash kur.sh                    # kurar ya da eski sürümü günceller (ayarlar ve sesler korunur, önce yedeklenir)
+bash kur.sh --denetle          # yalnızca sistemi denetler
+bash kur.sh --sifirla-ayarlar  # kurarken ayarları sıfırlar (sesler kalır); --sifirla-hepsi her şeyi
+bash kur.sh --kaldir           # kaldırır (ayarlar ve sesler silinmez; --verileri-de-sil ile silinir)
+bash kur.sh --evet             # hiçbir şey sormaz
 ```
+
+`kur.sh` sistemi baştan sona denetler (işlemci, glibc, masaüstü, tepsi simgesi desteği, PipeWire/PulseAudio ve sesin
+kapalı olup olmadığı, uyku engeli, systemd, yazı tipleri, boş yer, internet), kurulu sürümü bulup günceller, açık
+olan programı kapatıp yeni sürümle yeniden açar, eski kopyaları gösteren kayıtları düzeltir, paket bütünlüğünü SHA256
+ile doğrular ve isterseniz ayarları ya da her şeyi (yedekleyerek) sıfırlar.
 
 Kurmadan denemek için klasördeki `./okulzili` dosyasını çalıştırmanız yeterlidir. Paket Ubuntu 24.04'te
 derlenir; **Lubuntu/Ubuntu 24.04, 26.04** ve aynı ya da daha yeni sistemlerde Python kurmadan çalışır.
@@ -174,7 +182,8 @@ Linux'ta farklı olanlar:
 | Kapanırsa yeniden açma (bekçi) | systemd kullanıcı zamanlayıcısı `okulzili-bekci.timer` (5 dakikada bir) |
 | Okul saatlerinde uyku engeli | `systemd-inhibit` (program kapanınca, çökse bile engel kalkar) |
 | Ses kapalı/kısık uyarısı | PipeWire (`wpctl`) ya da PulseAudio (`pactl`) |
-| Pencereyi kapatınca | Program görev çubuğuna küçülür; tamamen kapatmak için sağ alttaki **«⏻ Programı kapat»** |
+| Tepsi simgesi | StatusNotifierItem / AppIndicator (LXQt, KDE, XFCE, Cinnamon; GNOME'da eklentiyle). Pencere kapatılınca simgede durur; panel simge göstermiyorsa görev çubuğuna küçülür. Tamamen kapatmak için **«⏻ Programı kapat»** |
+| Bilgisayar açılınca | Pencere açılmadan, simge olarak başlar (Ayarlar → Genel) |
 | İnternetsiz sesli anons | `espeak-ng` (Türkçe sesi var): `sudo apt install espeak-ng` |
 | «Ses ayarlarını aç» düğmesi | `pavucontrol-qt` / `pavucontrol` |
 | Güncelleme | «Güncelleme var» düğmesi yeni paketi indirip programı yeniler ve yeniden açar |

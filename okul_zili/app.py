@@ -236,6 +236,10 @@ class App:
             self.window.after(300, self.window.open_setup_wizard)
         elif not self.cfg.get("level"):
             self.window.after(300, self.window.open_level_dialog)
+        elif self.cfg.get("start_in_tray", True) and \
+                (autostart.BACKGROUND_FLAG in sys.argv or "--oz-watchdog" in sys.argv):
+            # Bilgisayar açılınca ya da bekçi yeniden açınca pencere açılmadan tepside başlanır.
+            self.window.after(500, self.window.start_hidden)
         self.window.mainloop()
 
 
@@ -360,6 +364,15 @@ def self_test(out_path):
                 time.sleep(0.1)
             root.destroy()
             result["linux_render"] = theme.ctk.ThemeManager.theme["CTkFont"]["family"]
+        if sys.platform.startswith("linux") and getattr(sys, "frozen", False):
+            # Tepsi simgesi (StatusNotifierItem / AppIndicator) pakette olmalı.
+            import gi
+            gi.require_version("AyatanaAppIndicator3", "0.1")
+            importlib.import_module("gi.repository.AyatanaAppIndicator3")
+            import pystray
+            result["tray_backend"] = pystray.Icon.__module__
+            if not result["tray_backend"].endswith("_appindicator"):
+                raise RuntimeError(f"Tepsi altyapısı yanlış: {result['tray_backend']}")
         if os.name == "nt":
             importlib.import_module("PIL.ImageTk")           # geliştirici resmi (Hakkında)
             importlib.import_module("pystray._win32")       # sistem tepsisi
@@ -397,7 +410,7 @@ def main():
             # systemd zamanlayıcısı bu süreci bekler: program ayrı bir süreç olarak açılır, bekçi çıkar.
             import subprocess
             _release_instance()
-            subprocess.Popen(launch_args(), start_new_session=True, close_fds=True)
+            subprocess.Popen(launch_args(autostart.BACKGROUND_FLAG), start_new_session=True, close_fds=True)
             return
     elif not _acquire_instance(wait_seconds=20 if "--oz-restart" in sys.argv else 0):
         log.info("Program zaten açık; ikinci kopya kapatıldı")

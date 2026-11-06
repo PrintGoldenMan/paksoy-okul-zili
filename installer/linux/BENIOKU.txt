@@ -1,25 +1,41 @@
 OKUL ZİLİ – LİNUX
 =================
 
-Kurulum (yönetici izni gerekmez):
+Kurulum ve güncelleme (yönetici izni gerekmez):
   1. Bu klasörde bir uçbirim (terminal) açın. (Dosya yöneticisinde klasöre sağ tıklayın →
      «Uçbirimde aç» / «Open in Terminal».)
-  2. Şunu yazın:   sh kur.sh
+  2. Şunu yazın:   bash kur.sh
   3. Program uygulama menüsüne eklenir: Eğitim → Okul Zili.
+
+kur.sh neler yapar?
+  * Sistemi denetler: işlemci, glibc, masaüstü, tepsi simgesi desteği, ses (PipeWire/PulseAudio),
+    sesin kapalı olup olmadığı, uyku engeli, systemd, yazı tipleri, boş yer, internet.
+  * Eski sürümü bulur ve günceller. Ayarlar, ders saatleri ve sesler korunur; güncellemeden önce
+    ayarların bir yedeği alınır (~/.local/share/OkulZili/yedekler).
+  * Program açıksa kapatır, günceller ve yeni sürümle yeniden açar.
+  * Başka klasörde kalmış eski kopyaları gösteren otomatik başlatma / bekçi kayıtlarını yeni kuruluma
+    yönlendirir.
+  * İsterseniz ayarları ya da her şeyi sıfırlar (eskisi her zaman yedeklenir, silinmez).
+  * Eksik önerilen paketleri (espeak-ng, pavucontrol-qt…) söyler, isterseniz kurar.
+  * Paket dosyalarının bozuk olmadığını SHA256 ile doğrular.
+
+Seçenekler:
+  bash kur.sh                    Kur / güncelle (sorarak)
+  bash kur.sh --evet             Hiçbir şey sormadan, önerilen seçeneklerle kur / güncelle
+  bash kur.sh --denetle          Yalnızca sistemi denetle, hiçbir şeyi değiştirme
+  bash kur.sh --sifirla-ayarlar  Kurarken ayarları sıfırla (sesler kalır)
+  bash kur.sh --sifirla-hepsi    Kurarken her şeyi sıfırla (ayarlar + sesler)
+  bash kur.sh --kaldir           Programı kaldır (ayarlar ve sesler kalır)
+  bash kur.sh --kaldir --verileri-de-sil   Programı ve bütün verilerini kaldır
 
 Kurmadan denemek için:  ./okulzili
 
-Kaldırmak için:  sh kur.sh --kaldir
-
-Önerilen paketler (Lubuntu/Ubuntu'da çoğu zaten yüklüdür):
-  sudo apt install espeak-ng pavucontrol-qt
-  - espeak-ng: internet yokken Türkçe sesli anons
-  - pavucontrol-qt: «Ses ayarlarını aç» düğmesi
-
 Notlar:
-  * Pencereyi kapatmak programı görev çubuğuna küçültür; ziller çalmaya devam eder.
-    Programı tamamen kapatmak için ana ekranın sağ altındaki «⏻ Programı kapat».
-  * Bilgisayar açılınca otomatik başlatma ve «kapanırsa yeniden aç» (bekçi) Ayarlar → Genel'den açılır.
-  * Okul saatlerinde bilgisayar uykuya geçmez (systemd-inhibit). Ekran koruyucu/kilit ekranı
-    zilleri etkilemez.
+  * Pencere kapatılınca program saatin yanındaki simgede (tepside) çalışmaya devam eder. Paneli bu
+    simgeyi göstermeyen masaüstlerinde görev çubuğuna küçülür. Programı tamamen kapatmak için simgenin
+    menüsünden ya da ana ekranın sağ altındaki «⏻ Programı kapat».
+  * Bilgisayar açılınca program pencere açılmadan, simge olarak başlar (Ayarlar → Genel'den değişir).
+  * Lubuntu/LXQt'de simge görünmüyorsa: panele sağ tıklayın → «Pencere öğelerini yönet» → «Durum
+    Bildirici» (Status Notifier) ekleyin. GNOME'da «AppIndicator» eklentisi gerekir.
+  * Okul saatlerinde bilgisayar uykuya geçmez (systemd-inhibit).
   * Ayarlar ve sesler: ~/.local/share/OkulZili

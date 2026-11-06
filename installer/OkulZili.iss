@@ -51,7 +51,7 @@ Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: desktopico
 
 [Registry]
 ; Programın kendi «otomatik başlat» ayarıyla aynı kayıt (okul_zili/autostart.py).
-Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "OkulZili"; ValueData: """{app}\{#AppExe}"""; Tasks: autostart; Flags: uninsdeletevalue
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "OkulZili"; ValueData: """{app}\{#AppExe}"" --oz-arka-plan"; Tasks: autostart; Flags: uninsdeletevalue
 
 [UninstallDelete]
 Type: dirifempty; Name: "{app}"

@@ -794,18 +794,36 @@ class MainWindow(ctk.CTk):
         self.lift()
         self.focus_force()
 
+    def _tray_visible(self) -> bool:
+        tray = self.app.tray
+        return tray is not None and tray.is_visible()
+
+    def start_hidden(self, tries=15):
+        """Bilgisayar açılınca (otomatik başlatma / bekçi): pencere açılmadan tepside başla. Oturum açılırken
+        panel henüz hazır olmayabilir; o sırada pencere görev çubuğunda küçük bekler, simge görününce gizlenir."""
+        if self._tray_visible():
+            self.withdraw()
+            log.info("Program tepside başladı")
+            return
+        if self.state() != "iconic":
+            self.iconify()
+        if tries > 0:
+            self.after(2000, lambda: self.state() == "iconic" and self.start_hidden(tries - 1))
+        else:
+            log.info("Tepsi simgesi gösterilemiyor; program görev çubuğunda küçük başladı")
+
     def _on_close(self):
         tray = self.app.tray
-        if system.IS_LINUX and self.app.cfg.get("tray_on_close", True):
-            # Linux masaüstlerinin çoğu (ör. Lubuntu/LXQt) bu tür tepsi simgesini göstermeyebilir; gizlenen
-            # pencereye geri dönülemezdi. Pencere görev çubuğuna küçülür, program çalışmaya devam eder.
+        if system.IS_LINUX and self.app.cfg.get("tray_on_close", True) and not self._tray_visible():
+            # Paneli tepsi simgesi göstermeyen masaüstlerinde gizlenen pencereye geri dönülemezdi:
+            # pencere görev çubuğuna küçülür, program çalışmaya devam eder.
             self.iconify()
             if not getattr(self, "_tray_hint_shown", False):
                 self._tray_hint_shown = True
                 self.after(300, lambda: self.flash("Okul Zili görev çubuğunda çalışmaya devam ediyor. Kapatmak "
                                                    "için «⏻ Programı kapat».", seconds=10))
             return
-        if self.app.cfg.get("tray_on_close", True) and tray is not None and tray.available:
+        if self.app.cfg.get("tray_on_close", True) and self._tray_visible():
             # Pencere gizlenir; program ve ziller çalışmaya devam eder.
             self.withdraw()
             if not getattr(self, "_tray_hint_shown", False):

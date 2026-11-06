@@ -5,7 +5,7 @@
 |---|---|
 | **OkulZili-Kurulum-….exe** | **Önerilen.** Programı bilgisayara kurar, Başlat menüsüne ve isteğe bağlı masaüstüne kısayol ekler, bilgisayar açılınca otomatik başlatabilir. Denetim Masası'ndan kaldırılabilir. |
 | OkulZili-Tasinabilir-….exe | Kurulum gerektirmez; çift tıklayınca çalışır (USB bellekten kullanım için). |
-| OkulZili-Linux-x86_64-….tar.gz | **Linux** (Lubuntu, Ubuntu, Mint…): paketi açıp `sh kur.sh`. |
+| OkulZili-Linux-x86_64-….tar.gz | **Linux** (Lubuntu, Ubuntu, Mint…): paketi açıp `bash kur.sh`. |
 
 ### Kurulum
 1. **OkulZili-Kurulum-….exe** dosyasını indirip çift tıklayın.
@@ -33,13 +33,20 @@ Ses seçilmemiş zil sessiz kalmaz, uyarı sesi çalar; ana ekranda sarı uyarı
 Oynatma listesi bağlantısı yapıştırılırsa program iki kez uyarır.
 
 ### Linux (Lubuntu, Ubuntu, Mint…)
-**OkulZili-Linux-x86_64-….tar.gz** dosyasını indirip açın; klasörde uçbirimde `sh kur.sh` yazın (yönetici izni
-gerekmez). Program uygulama menüsüne eklenir: Eğitim → Okul Zili. Ayrıntılar paketteki BENIOKU.txt dosyasında.
+**OkulZili-Linux-x86_64-….tar.gz** dosyasını indirip açın; klasörde uçbirimde `bash kur.sh` yazın (yönetici izni
+gerekmez; eski sürüm varsa ayarlar korunarak güncellenir). Program uygulama menüsüne eklenir: Eğitim → Okul Zili. Ayrıntılar paketteki BENIOKU.txt dosyasında.
 
 ### Bu sürümde yeni (1.5.0)
 - **Hazır zil sesi:** Program artık kendi zil sesiyle gelir: Beethoven'ın Für Elise'inin açılış cümlesi (programa
   yalnızca ilk 15 saniyesi gömülüdür). Zil yaklaşık 10 saniye çalar ve müzik cümlesi bittiği yerde yumuşakça susar.
   Sesi hiç seçilmemiş zillere kendiliğinden verilir; kendi seçtiğiniz seslere dokunulmaz.
+- **Tepside başlama:** Bilgisayar açılınca (ya da program kendiliğinden yeniden açılınca) pencere açılmadan, saatin
+  yanındaki simge olarak başlar (Ayarlar → Genel'den kapatılabilir).
+- **Linux'ta tepsi simgesi:** Lubuntu/LXQt, KDE, XFCE ve diğerlerinde saatin yanında simge görünür (sustur, göster,
+  programı kapat). Panel simge göstermiyorsa pencere görev çubuğuna küçülür.
+- **Linux kurulumu (kur.sh) yenilendi:** sistemi baştan sona denetler, eski sürümü bulup ayarları yedekleyerek
+  günceller, açık programı kapatıp yeniden açar, isterseniz ayarları ya da her şeyi sıfırlar
+  (`bash kur.sh --yardim`).
 - **Saati internetten al** (Ayarlar → Genel → Denetimler, varsayılan kapalı): açılırsa ziller bilgisayarın saatine
   göre değil internet saatine göre çalar; bilgisayarın saati yanlış olsa da ziller doğru zamanda çalar. Saat 30
   dakikada bir alınır; internet yoksa son alınan saatle, hiç alınamadıysa bilgisayar saatiyle devam edilir.

@@ -546,10 +546,12 @@ class SettingsWindow(ctk.CTkToplevel):
         if not autostart.supported():
             cb.configure(state="disabled", text=cb.cget("text") + " – bu sistemde desteklenmiyor")
         tray_var = ctk.BooleanVar(value=cfg.get("tray_on_close", True))
-        ctk.CTkCheckBox(b, text=("Pencere kapatılınca program görev çubuğuna küçülüp çalışmaya devam etsin "
-                                 "(önerilir)") if system.IS_LINUX else
-                        "Pencere kapatılınca program saatin yanındaki simgede çalışmaya devam etsin (önerilir)",
-                        variable=tray_var).grid(row=1, column=0, columnspan=3, sticky="w", pady=4)
+        ctk.CTkCheckBox(b, text="Pencere kapatılınca program saatin yanındaki simgede (tepside) çalışmaya devam "
+                                "etsin (önerilir)", variable=tray_var).grid(row=1, column=0, columnspan=3,
+                                                                           sticky="w", pady=4)
+        start_tray_var = ctk.BooleanVar(value=cfg.get("start_in_tray", True))
+        ctk.CTkCheckBox(b, text="Bilgisayar açılınca pencere açılmadan, simge olarak başlasın (önerilir)",
+                        variable=start_tray_var).grid(row=2, column=0, columnspan=3, sticky="w", pady=4)
 
         self._hint(f, "Ders saatlerini veya zil seslerini değiştirmek için yukarıdan «Basit» düzeyini seçin.")
         self._help_card(f, wizard=False)
@@ -558,6 +560,7 @@ class SettingsWindow(ctk.CTkToplevel):
             cfg["master_volume"] = int(vol.get())
             cfg["autostart"] = bool(auto_var.get())
             cfg["tray_on_close"] = bool(tray_var.get())
+            cfg["start_in_tray"] = bool(start_tray_var.get())
             try:
                 seconds = dur.get()
             except ValueError as exc:
@@ -586,10 +589,11 @@ class SettingsWindow(ctk.CTkToplevel):
         if not autostart.supported():
             cb.configure(state="disabled", text=cb.cget("text") + " – bu sistemde desteklenmiyor")
         toggles = [
-            ("tray_on_close", ("Pencere kapatılınca program kapanmasın, görev çubuğuna küçülüp çalışmaya devam "
-                               "etsin (önerilir)") if system.IS_LINUX else
-                              ("Pencere kapatılınca program kapanmasın, saatin yanındaki simgede (sistem tepsisi) "
-                               "çalışmaya devam etsin (önerilir)"), True),
+            ("tray_on_close", ("Pencere kapatılınca program kapanmasın, saatin yanındaki simgede (tepside) çalışmaya devam etsin "
+                               "(önerilir)" + (" – panel simge göstermiyorsa görev çubuğuna küçülür"
+                                               if system.IS_LINUX else "")), True),
+            ("start_in_tray", "Bilgisayar açılınca pencere açılmadan, saatin yanındaki simge olarak başlasın "
+                              "(önerilir)", True),
             ("watchdog", "Program beklenmedik şekilde kapanırsa 5 dakika içinde kendiliğinden yeniden açılsın "
                          "(önerilir)", system.watchdog_supported()),
             ("keep_awake", "Okul saatlerinde bilgisayar uyku moduna geçmesin (önerilir)", True),
@@ -605,7 +609,9 @@ class SettingsWindow(ctk.CTkToplevel):
             toggle_vars[key] = var
             r += 1
         self._hint(b, "Program tamamen kapatılmak istenirse saatin yanındaki zil simgesine sağ tıklayıp "
-                      "«Programı kapat» seçilir. Bilerek kapatılan program kendiliğinden yeniden açılmaz.", row=r)
+                      "«Programı kapat» seçilir" + (" (ya da ana ekranın sağ altındaki «⏻ Programı kapat»)"
+                                                    if system.IS_LINUX else "") +
+                      ". Bilerek kapatılan program kendiliğinden yeniden açılmaz.", row=r)
         r += 1
         exit_var = ctk.BooleanVar(value=cfg.get("confirm_exit", True))
         if self._at_least("uzman"):

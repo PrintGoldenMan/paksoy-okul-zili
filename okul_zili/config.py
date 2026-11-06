@@ -133,6 +133,7 @@ DEFAULTS = {
     "keep_awake": True,          # okul saatlerinde bilgisayarın uykuya geçmesini engelle
     "check_updates": True,       # yeni sürüm çıkınca haber ver
     "check_clock": True,         # internet varsa bilgisayar saatini denetle
+    "start_in_tray": True,       # bilgisayar açılınca pencere açılmadan tepside başla (autostart.BACKGROUND_FLAG)
     "use_network_time": False,   # ziller bilgisayar saati yerine internet saatine göre çalsın (clock.py)
     "check_volume": True,        # Windows sesi kapalı/çok kısıksa uyar
     "prepare_announcements": True,

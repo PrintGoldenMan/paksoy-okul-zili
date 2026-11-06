@@ -150,3 +150,47 @@ class UISmokeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipUnless(_display_available(), "ekran yok")
+class StartHiddenTests(unittest.TestCase):
+    """Bilgisayar açılınca tepside başlama: simge görünüyorsa pencere gizlenir, görünmüyorsa küçültülür."""
+
+    def _window(self, visible):
+        import tkinter
+        from types import SimpleNamespace
+        from okul_zili.ui.main_window import MainWindow
+
+        class FakeTray:
+            available = True
+
+            def is_visible(self):
+                return visible
+
+        win = tkinter.Tk()
+        win.app = SimpleNamespace(tray=FakeTray())
+        win._tray_visible = MainWindow._tray_visible.__get__(win)
+        win.start_hidden = MainWindow.start_hidden.__get__(win)
+        win.update()
+        return win
+
+    def test_hidden_when_tray_visible(self):
+        win = self._window(True)
+        try:
+            win.start_hidden(tries=0)
+            win.update()
+            self.assertEqual(win.state(), "withdrawn")
+        finally:
+            win.destroy()
+
+    def test_minimized_when_no_tray(self):
+        win = self._window(False)
+        calls = []
+        win.iconify = lambda: calls.append("iconify")   # sanal ekranda pencere yöneticisi yok
+        try:
+            win.start_hidden(tries=0)
+            win.update()
+            self.assertEqual(calls, ["iconify"])
+            self.assertNotEqual(win.state(), "withdrawn")   # gizlenmedi: görev çubuğundan geri açılabilir
+        finally:
+            win.destroy()

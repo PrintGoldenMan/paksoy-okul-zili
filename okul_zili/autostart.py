@@ -13,6 +13,8 @@ log = logging.getLogger(__name__)
 _KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 _NAME = "OkulZili"
 IS_LINUX = sys.platform.startswith("linux")
+# Bilgisayar açılınca başlatılan program bu bayrakla açılır: ayar açıksa pencere açılmadan tepside başlar.
+BACKGROUND_FLAG = "--oz-arka-plan"
 
 
 def supported() -> bool:
@@ -21,11 +23,11 @@ def supported() -> bool:
 
 def _command() -> str:
     if getattr(sys, "frozen", False):
-        return f'"{sys.executable}"'
+        return f'"{sys.executable}" {BACKGROUND_FLAG}'
     pythonw = Path(sys.executable).with_name("pythonw.exe")
     exe = pythonw if pythonw.exists() else Path(sys.executable)
     main = Path(__file__).resolve().parent.parent / "main.py"
-    return f'"{exe}" "{main}"'
+    return f'"{exe}" "{main}" {BACKGROUND_FLAG}'
 
 
 def _desktop_file() -> Path:
@@ -47,7 +49,7 @@ def desktop_exec(args) -> str:
 
 def _linux_exec() -> str:
     from .app import launch_args
-    return desktop_exec(launch_args())
+    return desktop_exec(launch_args(BACKGROUND_FLAG))
 
 
 def is_enabled() -> bool:
