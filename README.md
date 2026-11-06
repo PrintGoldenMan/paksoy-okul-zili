@@ -19,6 +19,11 @@ Linux: `OkulZili-Linux-x86_64-….tar.gz` ·
   ziller çalmaz; tören sırasında zamanı gelen zil tören bitince 3 saniye sonra çalar (birden fazlaysa yalnızca en
   sonuncusu; 5 dakikadan eskiyse hiç). Başlatmadan önce sorulur; ses kapalıysa uyarılır; çift tıklama töreni
   durdurmaz; elle zil ve anons törenin üstüne binmez.
+
+| Tören çalarken (kalan süre ve «Durdur») | Ayarlar → Zil Sesleri → Tören Sesleri |
+|---|---|
+| ![Tören](docs/toren.png) | ![Tören sesleri ayarı](docs/toren_ayarlari.png) |
+
 - **Kurulum sihirbazı:** İlk açılışta okulun adı, türü (İlkokul / Ortaokul / Lise / Anaokulu), tekli ya da ikili
   öğretim ve ders saatleri sorulur; ders saatleri okul türüne göre önceden doldurulur.
 - **İkili öğretim:** Sabahçı ve öğlenci gruplarının kendi ders saatleri olur; iki grubun zilleri aynı gün art arda

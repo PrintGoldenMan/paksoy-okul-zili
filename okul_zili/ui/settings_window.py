@@ -67,10 +67,10 @@ class SoundPicker(ctk.CTkFrame):
         if self.allow_none:
             opts.append((sounds.NO_SOUND, sounds.NO_SOUND_NAME))
         if sounds.is_missing(self.sound_id):
-            opts.insert(0, (self.sound_id, self._name(self.sound_id)))
+            opts.insert(0, (self.sound_id, self._label_for(self.sound_id)))
         return opts
 
-    def _name(self, sound_id):
+    def _label_for(self, sound_id):
         if not self.allow_none and sounds.is_missing(sound_id):
             # Tören sesi: yoksa uyarı sesi çalmaz, düğme indirmeyi önerir.
             return "(Silinmiş ses – yeniden indirin)" if sound_id else "(Henüz indirilmedi)"
@@ -80,7 +80,7 @@ class SoundPicker(ctk.CTkFrame):
         opts = self._choices()
         values = [name for _, name in opts] + ([OPEN_LIBRARY] if self.open_library else [])
         self.menu.configure(values=values)
-        self.menu.set(next((n for sid, n in opts if sid == self.sound_id), self._name(self.sound_id)))
+        self.menu.set(next((n for sid, n in opts if sid == self.sound_id), self._label_for(self.sound_id)))
         missing = sounds.is_missing(self.sound_id)
         self.menu.configure(fg_color=theme.WARNING if missing else theme.ACCENT,
                             text_color=theme.WARNING_TEXT if missing else "white")
@@ -1039,8 +1039,8 @@ class SettingsWindow(ctk.CTkToplevel):
         ctk.CTkCheckBox(checks, text="Ana ekranda tören düğmeleri görünsün", variable=show).pack(side="left")
         if self._at_least("gelismis"):
             ctk.CTkCheckBox(checks, text="Başlatmadan önce sor", variable=confirm).pack(side="left", padx=(20, 0))
-        self._hint(b, "Ses düzeyi genel ses düzeyine göredir. Tören sesleri indirilirken ses düzeyi eşitlenmez ve "
-                      "sessiz bölümler kırpılmaz (saygı duruşunun sessiz dakikası korunur). Kütüphanede "
+        self._hint(b, "Ses düzeyi genel ses düzeyine göredir. Programla gelen sesler internetsiz çalar. İnternetten "
+                      "indirilen tören seslerinde ses düzeyi eşitlenmez ve aradaki sessizlik kırpılmaz. Kütüphanede "
                       "«çalınacak bölüm» seçerseniz tören de o bölümü çalar.")
 
         def collect():
