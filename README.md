@@ -1,10 +1,12 @@
 # Okul Zili
 
-Okul zillerini ders programına göre otomatik çalan, Türkçe arayüzlü, ücretsiz ve açık kaynaklı Windows programı.
+Okul zillerini ders programına göre otomatik çalan, Türkçe arayüzlü, ücretsiz ve açık kaynaklı **Windows ve Linux**
+programı (Lubuntu, Ubuntu, Mint…).
 İlkokul, ortaokul, lise ve anaokulları için; tekli ve **ikili öğretim** (sabahçı / öğlenci) desteklenir.
 MEB çalışma takvimi her yıl kendiliğinden güncellenir.
 
-**İndir:** [Sürümler (Releases)](../../releases/latest) → `OkulZili-Kurulum-….exe` ·
+**İndir:** [Sürümler (Releases)](../../releases/latest) → Windows: `OkulZili-Kurulum-….exe` ·
+Linux: `OkulZili-Linux-x86_64-….tar.gz` ·
 **Sorun / öneri:** [GitHub Issues](../../issues/new)
 
 ![Ana ekran](docs/ana_ekran.png)
@@ -47,7 +49,7 @@ MEB çalışma takvimi her yıl kendiliğinden güncellenir.
     seslerden bir öncekinden farklı biri rastgele seçilir ve dönem boyunca aynı kalır (program yeniden açılsa da).
     Haftalar pazartesi, aylar ayın 1'inde değişir. «Şimdi değiştir» ile hemen yeni bir ses seçilebilir.
   - Hem şarkı hem liste içeren YouTube bağlantılarında (`watch?v=…&list=…`) yalnızca o şarkı indirilir.
-  - Zil sesi seçilmemişse (ilk kurulumda olduğu gibi) zil sessiz kalmaz: Windows uyarı sesi çalar ve ana ekranda
+  - Zil sesi seçilmemişse (ilk kurulumda olduğu gibi) zil sessiz kalmaz: uyarı sesi çalar ve ana ekranda
     sarı uyarı görünür.
   - YouTube için gereken Deno çalıştırıcısı ilk YouTube indirmesinde bir kez otomatik indirilir (~40 MB).
     YouTube değiştiğinde Kütüphane penceresindeki **«yt-dlp'yi güncelle»** düğmesiyle indirici güncellenir.
@@ -72,16 +74,17 @@ MEB çalışma takvimi her yıl kendiliğinden güncellenir.
 - **Güvenlik:** Ziller kapatıldığında ekranın üstünde kırmızı «ZİLLER KAPALI» uyarısı ve tek tıkla
   açma düğmesi görünür. Zilleri kapatmak, elle zil çalmak ve programı kapatmak onay ister.
   Program iki kez açılamaz (ziller iki kez çalmaz). Ses aygıtı sonradan bağlanırsa ses kendiliğinden düzelir;
-  bozuk ya da silinmiş bir ses dosyasında Windows uyarı sesi çalar.
+  bozuk ya da silinmiş bir ses dosyasında uyarı sesi çalar.
 - **Sistem tepsisi:** Pencere kapatılınca program kapanmaz, saatin yanındaki zil simgesinde çalışmaya devam eder.
   Tamamen kapatmak için simgeye sağ tıklayıp «Programı kapat» seçilir (Ayarlar → Genel'den kapatılabilir).
-- **Kendiliğinden yeniden açılma:** Program beklenmedik şekilde kapanırsa Windows Görev Zamanlayıcı onu 5 dakika
-  içinde yeniden açar. Bilerek kapatılan program açılmaz.
+  Linux'ta pencere görev çubuğuna küçülür; tamamen kapatmak için sağ alttaki «⏻ Programı kapat».
+- **Kendiliğinden yeniden açılma:** Program beklenmedik şekilde kapanırsa 5 dakika içinde yeniden açılır
+  (Windows: Görev Zamanlayıcı, Linux: systemd zamanlayıcısı). Bilerek kapatılan program açılmaz.
 - **Uyku engeli:** İlk zilden 30 dk önce ile son zilden 5 dk sonra arasında bilgisayar uykuya geçmez.
-- **Denetimler:** Windows sesi kapalı / çok kısıksa ya da hoparlör yoksa kırmızı uyarı; bilgisayar saati internet
+- **Denetimler:** Bilgisayarın sesi kapalı / çok kısıksa ya da hoparlör yoksa kırmızı uyarı; bilgisayar saati internet
   saatinden 1 dakikadan fazla farklıysa sarı uyarı (internet varsa).
 - **Kendini güncelleme:** Yeni sürüm çıkınca üstte «Güncelleme var» düğmesi görünür; «Güncelle» yeni sürümü indirir,
-  sessizce kurar ve programı yeniden açar.
+  sessizce kurar ve programı yeniden açar (Windows ve Linux).
 - **Tam yedek:** Ayarlar ve bütün sesler tek bir .zip dosyasına; yeni bilgisayarda tek tıkla geri yüklenir.
 - **MEB çalışma takvimi:** Ara tatiller, yarıyıl, bayramlar, 28 Ekim öğleden sonra ve yaz tatili tek tıkla eklenir.
   Takvim bu depodaki [`takvim/meb_takvim.json`](takvim/meb_takvim.json) dosyasından haftada bir indirilir; yeni eğitim
@@ -89,7 +92,8 @@ MEB çalışma takvimi her yıl kendiliğinden güncellenir.
   Yarım günlük tatiller desteklenir (belirtilen saatten sonraki ziller çalmaz).
 - **Çalınacak bölüm:** Kütüphanede her ses için zilde çalınacak bölüm seçilir (ör. nakarat 1:05–1:20).
   Ek ziller «sonuna kadar çal» seçeneğiyle İstiklal Marşı gibi uzun sesleri tam çalabilir.
-- Açık ve koyu tema. Küçük ekranlarda ve Windows ölçeklendirmesinde (%125, %150) pencereler ekrana sığar.
+- Açık ve koyu tema. Küçük ekranlarda ve Windows ölçeklendirmesinde (%125, %150) pencereler ekrana sığar;
+  «Sustur» düğmesi sığmayacaksa ana ekran sıkışık düzene geçer.
 
 ## Ayar düzeyleri
 
@@ -217,7 +221,10 @@ python -m unittest discover -s tests    # testleri çalıştırır
 | `okul_zili/scheduler.py` | Saati izler, zamanı gelen zili çalar |
 | `okul_zili/audio.py` | Zil ve anonsları sırayla çalar (pygame) |
 | `okul_zili/sounds.py` | Zil sesi kimliklerini kütüphanedeki dosyalara çevirir |
-| `okul_zili/system.py` | Uyku engeli, Windows ses düzeyi, internet saati, yeniden başlatma görevi |
+| `okul_zili/system.py` | Uyku engeli, ses düzeyi, internet saati, yeniden başlatma görevi (Windows ve Linux) |
+| `okul_zili/autostart.py` | Açılışta otomatik başlatma (Windows kayıt defteri / Linux autostart) |
+| `okul_zili/ceremony.py` | Tören düğmeleri (İstiklal Marşı, Saygı Duruşu + İstiklal Marşı) |
+| `okul_zili/gomulu_sesler.py` | Programla gelen tören sesleri (Opus, bayt olarak gömülü; `tools/` ile üretilir) |
 | `okul_zili/tray.py` | Sistem tepsisi simgesi |
 | `okul_zili/updater.py` | Programın kendini güncellemesi (GitHub sürümleri) |
 | `okul_zili/backup.py` | Tam yedek (ayarlar + sesler) |
@@ -226,8 +233,16 @@ python -m unittest discover -s tests    # testleri çalıştırır
 | `okul_zili/rotation.py` | Değişen zil sesi (gün/hafta/ay için rastgele seçim) |
 | `okul_zili/library.py` | Ses kütüphanesi (kayıt listesi, kısa dosya adları) |
 | `okul_zili/downloader.py` | yt-dlp ile indirme, ffmpeg ile Opus'a dönüştürme, yt-dlp/Deno güncelleme |
-| `okul_zili/tts.py` | Türkçe sesli anons (edge-tts / pyttsx3) |
+| `okul_zili/tts.py` | Türkçe sesli anons (edge-tts / pyttsx3 / Linux'ta espeak-ng) |
 | `okul_zili/ui/` | Arayüz (customtkinter) |
+| `installer/` | Windows kurulumu (Inno Setup), Linux kurulum betiği (`linux/kur.sh`), sürüm notları |
+| `tools/gomulu_sesler_olustur.py` | Tören seslerini programa gömer |
+
+### Tören seslerini değiştirme
+
+Yeni kayıtları `toren_kaynak/istiklal.<uzantı>` ve `toren_kaynak/saygi.<uzantı>` olarak koyup
+`python tools/gomulu_sesler_olustur.py` çalıştırın: sesler Opus 160 kb/sn'ye çevrilir (yalnızca baştaki/sondaki
+sessizlik kırpılır, ses düzeyi değişmez) ve `okul_zili/gomulu_sesler.py` yeniden üretilir.
 
 ### MEB takvimini güncelleme (her yıl)
 

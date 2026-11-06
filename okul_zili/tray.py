@@ -41,6 +41,11 @@ class Tray:
                 pystray.MenuItem("Programı kapat (ziller çalmaz)", lambda: self.commands.put("quit")),
             )
             self._backend = pystray.Icon.__module__
+            if self._backend.endswith("_xorg"):
+                # Eski X11 tepsisi (XEmbed): LXQt/Lubuntu gibi masaüstlerinde yoktur ve pystray kendi iş
+                # parçacığında hata verir. Linux'ta pencere zaten görev çubuğuna küçüldüğü için kullanılmaz.
+                log.info("Sistem tepsisi atlandı (X11 tepsisi; pencere görev çubuğuna küçülür)")
+                return
             self.icon = pystray.Icon("OkulZili", image, _safe_title("Okul Zili – ziller çalışıyor", self._backend),
                                      menu)
             if hasattr(self.icon, "run_detached"):
