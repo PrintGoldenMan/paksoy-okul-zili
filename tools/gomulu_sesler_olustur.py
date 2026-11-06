@@ -2,8 +2,9 @@
 
 Kullanım:  python tools/gomulu_sesler_olustur.py
 toren_kaynak/ içine «istiklal.<uzantı>» ve «saygi.<uzantı>» adıyla herhangi bir ses dosyası konur
-(mp3, m4a, webm, opus, ogg, wav, flac). Dosyalar yüksek kaliteli Opus'a (128 kb/sn, 48 kHz, stereo)
-çevrilir; ses düzeyi eşitlenmez ve sessizlik kırpılmaz (saygı duruşunun sessiz dakikası korunur).
+(mp3, m4a, webm, opus, ogg, wav, flac). Dosyalar yüksek kaliteli Opus'a (160 kb/sn, 48 kHz, stereo)
+çevrilir. Ses düzeyi eşitlenmez; yalnızca en baştaki ve en sondaki sessizlik kırpılır (düğmeye basınca ses
+hemen başlasın), aradaki sessiz bölümlere (ör. saygı duruşu) dokunulmaz.
 Sonuç modülün içine bayt (base64) olarak yazılır; program ilk kullanımda bunları veri klasörüne
 çıkarır (sounds.py). İsteğe bağlı «<ad>.json» dosyası kaynağı belirtir: {"webpage_url": …, "title": …}.
 """
@@ -38,10 +39,16 @@ def find_source(key):
     raise SystemExit(f"Bulunamadı: {SRC / key}.(mp3/m4a/opus/…)")
 
 
+# Baştaki ve sondaki sessizlik: baştan kırp, ters çevir, (sondaki) baştan kırp, geri çevir.
+# Kısa bir sessizlik payı bırakılır; aradaki sessizliklere dokunulmaz.
+EDGE_TRIM = ("silenceremove=start_periods=1:start_threshold=-50dB:start_silence=0.2,areverse,"
+             "silenceremove=start_periods=1:start_threshold=-50dB:start_silence=0.5,areverse")
+
+
 def to_opus(src, out):
     subprocess.run([ffmpeg(), "-hide_banner", "-loglevel", "error", "-y", "-i", str(src), "-vn", "-sn", "-dn",
-                    "-map_metadata", "-1", "-ar", "48000", "-ac", "2", "-c:a", "libopus", "-b:a", "128k",
-                    "-f", "opus", str(out)], check=True)
+                    "-map_metadata", "-1", "-af", EDGE_TRIM, "-ar", "48000", "-ac", "2", "-c:a", "libopus",
+                    "-b:a", "160k", "-f", "opus", str(out)], check=True)
 
 
 def duration(path):

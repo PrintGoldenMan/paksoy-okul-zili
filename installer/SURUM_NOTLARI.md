@@ -38,11 +38,11 @@ gerekmez). Program uygulama menüsüne eklenir: Eğitim → Okul Zili. Ayrıntı
 ### Bu sürümde yeni (1.4.0)
 - **Linux desteği** (Lubuntu 26.04 ve diğerleri): hazır paket, otomatik başlatma, uyku engeli, kapanırsa yeniden
   açma, ses düzeyi uyarısı, internetsiz Türkçe anons (espeak-ng), kendini güncelleme.
-- **Tören düğmeleri:** Ana ekranda **«İstiklal Marşı»** ve **«Saygı Duruşu + İstiklal Marşı»**. İlk basışta ses
-  internetten bir kez indirilir; sonra internet gerekmez.
+- **Tören düğmeleri:** Ana ekranda **«İstiklal Marşı»** ve **«Saygı Duruşu + İstiklal Marşı»**. Sesler programla
+  birlikte gelir; internet gerekmez. Programla gelen sesler ek zillerde de seçilebilir (ör. pazartesi İstiklal Marşı).
 - Tören sürerken ziller çalmaz; zamanı gelen zil tören bitince birkaç saniye sonra çalar. Başlatmadan önce sorulur,
   çalarken düğme kalan süreyi gösterir ve «Durdur» olur. Elle zil ya da anons törenin üstüne binmez (önce sorulur).
-- Tören sesleri olduğu gibi kaydedilir: saygı duruşunun sessiz dakikası kırpılmaz.
+- İnternetten indirilen tören sesleri olduğu gibi kaydedilir: ses düzeyi eşitlenmez, aradaki sessizlik kırpılmaz.
 - Ayarlar → Zil Sesleri → **Tören Sesleri**: ses seçimi, ses düzeyi, yeniden indirme.
 - Uyarı şeridi varken 1080p ekranda «Sustur» düğmesinin yarısı görünmüyordu; düzeltildi.
 

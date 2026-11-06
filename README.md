@@ -12,7 +12,8 @@ MEB çalışma takvimi her yıl kendiliğinden güncellenir.
 ## Özellikler
 
 - **Tören düğmeleri:** Ana ekrandaki **«İstiklal Marşı»** ve **«Saygı Duruşu + İstiklal Marşı»** düğmeleri.
-  Ses ilk basışta internetten bir kez indirilir (ses düzeyi eşitlenmeden, sessiz dakika korunarak). Tören sürerken
+  Sesler programla birlikte gelir (koda gömülü, Opus 160 kb/sn; internet gerekmez); istenirse Ayarlar → Zil Sesleri
+  → Tören Sesleri'nden başka bir kayıt seçilebilir ya da internetten indirilebilir. Tören sürerken
   ziller çalmaz; tören sırasında zamanı gelen zil tören bitince 3 saniye sonra çalar (birden fazlaysa yalnızca en
   sonuncusu; 5 dakikadan eskiyse hiç). Başlatmadan önce sorulur; ses kapalıysa uyarılır; çift tıklama töreni
   durdurmaz; elle zil ve anons törenin üstüne binmez.

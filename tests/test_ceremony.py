@@ -134,7 +134,8 @@ class ConfigTests(unittest.TestCase):
         cfg = config._sanitize(config._merge(config.DEFAULTS, {"ceremony": {"items": {"istiklal": 5}, "volume": "x"}}))
         self.assertEqual(cfg["ceremony"]["items"]["istiklal"], {"sound": "", "url": ""})
         self.assertEqual(cfg["ceremony"]["volume"], 100)
-        self.assertFalse(ceremony.is_ready(cfg, "istiklal"))
+        # Ses seçilmemiş: programla gelen ses kullanılır (gömülü ses modülü varsa).
+        self.assertEqual(ceremony.sound_of(cfg, "istiklal"), ceremony.builtin_id("istiklal"))
         self.assertEqual(ceremony.url_of(cfg, "saygi"), "https://youtu.be/PMhKP8QyxFQ")
 
     def test_video_id(self):
@@ -197,3 +198,19 @@ class EmbeddedSoundTests(unittest.TestCase):
         self.assertEqual(ceremony.sound_of(cfg, "saygi"), "")   # bu ses gömülü değil: indirme önerilir
         cfg["ceremony"]["items"]["istiklal"]["sound"] = "lib:baska"
         self.assertEqual(ceremony.sound_of(cfg, "istiklal"), "lib:baska")
+
+
+class ShippedSoundsTests(unittest.TestCase):
+    """Programla gelen gerçek tören sesleri (okul_zili/gomulu_sesler.py) bozulmamış olmalı."""
+
+    def test_embedded_module_is_valid(self):
+        import base64
+        import hashlib
+        from okul_zili import gomulu_sesler
+        self.assertEqual(set(gomulu_sesler.SESLER), set(ceremony.KEYS))
+        for key, info in gomulu_sesler.SESLER.items():
+            data = base64.b64decode("".join(info["veri"]))
+            self.assertEqual(len(data), info["boyut"], key)
+            self.assertEqual(hashlib.sha256(data).hexdigest(), info["sha256"], key)
+            self.assertTrue(data.startswith(b"OggS"), key)   # Opus (Ogg kabı)
+            self.assertGreater(info["sure"], 30, key)
