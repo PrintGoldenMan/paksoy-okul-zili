@@ -35,7 +35,11 @@ Oynatma listesi bağlantısı yapıştırılırsa program iki kez uyarır.
 **OkulZili-Linux-x86_64-….tar.gz** dosyasını indirip açın; klasörde uçbirimde `sh kur.sh` yazın (yönetici izni
 gerekmez). Program uygulama menüsüne eklenir: Eğitim → Okul Zili. Ayrıntılar paketteki BENIOKU.txt dosyasında.
 
-### Bu sürümde yeni (1.4.0)
+### Bu sürümde yeni (1.4.1)
+- Linux: Lubuntu/LXQt gibi eski X11 tepsisi olmayan masaüstlerinde tepsi simgesi hata veriyordu; artık
+  denenmez (pencere kapatılınca görev çubuğuna küçülür, «⏻ Programı kapat» ile kapanır).
+
+### 1.4.0
 - **Linux desteği** (Lubuntu 26.04 ve diğerleri): hazır paket, otomatik başlatma, uyku engeli, kapanırsa yeniden
   açma, ses düzeyi uyarısı, internetsiz Türkçe anons (espeak-ng), kendini güncelleme.
 - **Tören düğmeleri:** Ana ekranda **«İstiklal Marşı»** ve **«Saygı Duruşu + İstiklal Marşı»**. Sesler programla
