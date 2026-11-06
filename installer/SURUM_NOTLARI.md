@@ -11,7 +11,8 @@
 2. Windows «Bilinmeyen yayımcı / Windows bilgisayarınızı korudu» uyarısı gösterirse **«Ek bilgi» → «Yine de çalıştır»** seçin.
    (Program dijital olarak imzalanmadığı için bu uyarı normaldir.)
 3. Kurulumda **«Bilgisayar açılınca Okul Zili otomatik başlasın»** seçeneğini işaretli bırakın.
-4. Program ilk açılışta ayar düzeyini sorar; emin değilseniz **«Basit»** seçin.
+4. Program ilk açılışta okulun adını, türünü ve ders saatlerini sorar; ardından ayar düzeyini seçersiniz
+   (emin değilseniz **«Basit»**).
 
 ### Zil seslerini ekleyin (ilk kurulumda)
 Program kendi zil sesiyle gelmez; sesleri siz seçersiniz:
@@ -29,7 +30,16 @@ Her hafta (ya da her gün / her ay) farklı bir şarkı çalması için Ayarlar 
 Ses seçilmemiş zil sessiz kalmaz, Windows uyarı sesi çalar; ana ekranda sarı uyarı görünür.
 Oynatma listesi bağlantısı yapıştırılırsa program iki kez uyarır.
 
-### Bu sürümde yeni (1.3.0)
+### Bu sürümde yeni (1.4.0)
+- **Tören düğmeleri:** Ana ekranda **«İstiklal Marşı»** ve **«Saygı Duruşu + İstiklal Marşı»**. İlk basışta ses
+  internetten bir kez indirilir; sonra internet gerekmez.
+- Tören sürerken ziller çalmaz; zamanı gelen zil tören bitince birkaç saniye sonra çalar. Başlatmadan önce sorulur,
+  çalarken düğme kalan süreyi gösterir ve «Durdur» olur. Elle zil ya da anons törenin üstüne binmez (önce sorulur).
+- Tören sesleri olduğu gibi kaydedilir: saygı duruşunun sessiz dakikası kırpılmaz.
+- Ayarlar → Zil Sesleri → **Tören Sesleri**: ses seçimi, ses düzeyi, yeniden indirme.
+- Uyarı şeridi varken 1080p ekranda «Sustur» düğmesinin yarısı görünmüyordu; düzeltildi.
+
+### 1.3.0
 - **Her okul için:** İlk açılışta kurulum sihirbazı (okul adı, okul türü, tekli/ikili öğretim, ders saatleri).
 - **İkili öğretim:** Sabahçı ve öğlenci gruplarının kendi ders saatleri; iki grubun zilleri art arda çalar.
 - **Bugün kısaltılmış ders** düğmesi: yalnızca bugün için ders süreleri kısalır, yarın normale döner.

@@ -11,6 +11,11 @@ MEB çalışma takvimi her yıl kendiliğinden güncellenir.
 
 ## Özellikler
 
+- **Tören düğmeleri:** Ana ekrandaki **«İstiklal Marşı»** ve **«Saygı Duruşu + İstiklal Marşı»** düğmeleri.
+  Ses ilk basışta internetten bir kez indirilir (ses düzeyi eşitlenmeden, sessiz dakika korunarak). Tören sürerken
+  ziller çalmaz; tören sırasında zamanı gelen zil tören bitince 3 saniye sonra çalar (birden fazlaysa yalnızca en
+  sonuncusu; 5 dakikadan eskiyse hiç). Başlatmadan önce sorulur; ses kapalıysa uyarılır; çift tıklama töreni
+  durdurmaz; elle zil ve anons törenin üstüne binmez.
 - **Kurulum sihirbazı:** İlk açılışta okulun adı, türü (İlkokul / Ortaokul / Lise / Anaokulu), tekli ya da ikili
   öğretim ve ders saatleri sorulur; ders saatleri okul türüne göre önceden doldurulur.
 - **İkili öğretim:** Sabahçı ve öğlenci gruplarının kendi ders saatleri olur; iki grubun zilleri aynı gün art arda

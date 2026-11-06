@@ -21,7 +21,7 @@ import sys
 import customtkinter as ctk
 from tkinter import filedialog, messagebox
 
-from .. import ISSUES_URL, __version__, autostart, backup, config, library, meb_takvim, paths, rotation, schedule, sounds, system, tts
+from .. import ISSUES_URL, __version__, autostart, backup, ceremony, config, library, meb_takvim, paths, rotation, schedule, sounds, system, tts
 from ..config import (BELL_NAMES, BELL_TYPES, DEFAULT_RING_SECONDS, LEVEL_DESCRIPTIONS, LEVEL_NAMES, LEVELS,
                       MAX_RING_SECONDS, MIN_RING_SECONDS, ring_seconds)
 from ..schedule import fmt_hm, parse_hm
@@ -38,9 +38,10 @@ OPEN_LIBRARY = "🎵 Kütüphaneyi aç / yeni ses ekle…"
 class SoundPicker(ctk.CTkFrame):
     """Kütüphaneden zil sesi seçimi ve dinleme düğmesi."""
 
-    def __init__(self, master, player, sound_id, open_library=None, duration_spin=None):
+    def __init__(self, master, player, sound_id, open_library=None, duration_spin=None, allow_none=True):
         super().__init__(master, fg_color="transparent")
         self.player = player
+        self.allow_none = allow_none
         self.duration_spin = duration_spin
         self.open_library = open_library
         self.sound_id = sound_id or ""
@@ -60,16 +61,23 @@ class SoundPicker(ctk.CTkFrame):
             if seen[name] > 1:
                 name = f"{name} ({seen[name]})"
             opts.append((library.PREFIX + item["id"], name))
-        opts.append((sounds.NO_SOUND, sounds.NO_SOUND_NAME))
+        if self.allow_none:
+            opts.append((sounds.NO_SOUND, sounds.NO_SOUND_NAME))
         if sounds.is_missing(self.sound_id):
-            opts.insert(0, (self.sound_id, sounds.display_name(self.sound_id)))
+            opts.insert(0, (self.sound_id, self._name(self.sound_id)))
         return opts
+
+    def _name(self, sound_id):
+        if not self.allow_none and sounds.is_missing(sound_id):
+            # Tören sesi: yoksa uyarı sesi çalmaz, düğme indirmeyi önerir.
+            return "(Silinmiş ses – yeniden indirin)" if sound_id else "(Henüz indirilmedi)"
+        return sounds.display_name(sound_id)
 
     def refresh(self):
         opts = self._choices()
         values = [name for _, name in opts] + ([OPEN_LIBRARY] if self.open_library else [])
         self.menu.configure(values=values)
-        self.menu.set(next((n for sid, n in opts if sid == self.sound_id), sounds.display_name(self.sound_id)))
+        self.menu.set(next((n for sid, n in opts if sid == self.sound_id), self._name(self.sound_id)))
         missing = sounds.is_missing(self.sound_id)
         self.menu.configure(fg_color=theme.WARNING if missing else theme.ACCENT,
                             text_color=theme.WARNING_TEXT if missing else "white")
@@ -102,6 +110,8 @@ class SoundPicker(ctk.CTkFrame):
         return None
 
     def _preview(self):
+        if not self.allow_none and sounds.is_missing(self.sound_id):
+            return
         self.player.preview_sound(self.sound_id, self.preview_duration())
 
     def set_locked(self, locked):
@@ -986,6 +996,70 @@ class SettingsWindow(ctk.CTkToplevel):
                 if "volume" in w:
                     cfg["bells"][kind]["volume"] = int(w["volume"].get())
         self._collectors.append(collect)
+        self._ceremony_card(f)
+
+    def _ceremony_card(self, f):
+        """Tören sesleri: ana ekrandaki «İstiklal Marşı» ve «Saygı Duruşu + İstiklal Marşı» düğmeleri."""
+        cer = self.cfg["ceremony"]
+        b = self._card(f, "Tören Sesleri", "Ana ekrandaki tören düğmeleri bu sesleri çalar. Tören sürerken "
+                                           "ziller çalmaz; zamanı gelen zil tören bitince çalar.")
+        pickers = {}
+        for r, key in enumerate(ceremony.KEYS):
+            ctk.CTkLabel(b, text=ceremony.name(key), width=210, anchor="w", font=theme.font(13, "bold")).grid(
+                row=r, column=0, sticky="w", pady=4)
+            picker = SoundPicker(b, self.app.player, ceremony.sound_of(self.cfg, key),
+                                 open_library=self._open_library, allow_none=False)
+            picker.grid(row=r, column=1, sticky="w", pady=4)
+            ctk.CTkButton(b, text="⬇ İnternetten indir", width=150, fg_color="transparent", border_width=1,
+                          text_color=theme.TEXT, command=lambda k=key: self._download_ceremony(k)).grid(
+                row=r, column=2, sticky="w", padx=8, pady=4)
+            self._pickers.append(picker)
+            pickers[key] = picker
+        self._ceremony_pickers = pickers
+        opt = ctk.CTkFrame(b, fg_color="transparent")
+        opt.grid(row=len(ceremony.KEYS), column=0, columnspan=3, sticky="w", pady=(10, 0))
+        ctk.CTkLabel(opt, text="Tören ses düzeyi:").pack(side="left")
+        vol_lbl = ctk.CTkLabel(opt, text=f"%{cer.get('volume', 100)}", width=50)
+        vol = ctk.CTkSlider(opt, from_=10, to=100, number_of_steps=18, width=200,
+                            command=lambda v: vol_lbl.configure(text=f"%{int(v)}"))
+        vol.set(cer.get("volume", 100))
+        vol.pack(side="left", padx=6)
+        vol_lbl.pack(side="left")
+        show = ctk.BooleanVar(value=cer.get("show", True))
+        confirm = ctk.BooleanVar(value=cer.get("confirm", True))
+        checks = ctk.CTkFrame(b, fg_color="transparent")
+        checks.grid(row=len(ceremony.KEYS) + 1, column=0, columnspan=3, sticky="w", pady=(8, 0))
+        ctk.CTkCheckBox(checks, text="Ana ekranda tören düğmeleri görünsün", variable=show).pack(side="left")
+        if self._at_least("gelismis"):
+            ctk.CTkCheckBox(checks, text="Başlatmadan önce sor", variable=confirm).pack(side="left", padx=(20, 0))
+        self._hint(b, "Ses düzeyi genel ses düzeyine göredir. Tören sesleri indirilirken ses düzeyi eşitlenmez ve "
+                      "sessiz bölümler kırpılmaz (saygı duruşunun sessiz dakikası korunur). Kütüphanede "
+                      "«çalınacak bölüm» seçerseniz tören de o bölümü çalar.")
+
+        def collect():
+            items = cer.setdefault("items", {})
+            for key, picker in pickers.items():
+                items.setdefault(key, {})["sound"] = picker.get()
+            cer.update(volume=int(vol.get()), show=bool(show.get()), confirm=bool(confirm.get()))
+        self._collectors.append(collect)
+
+    def _download_ceremony(self, key):
+        from .ceremony_ui import CeremonyDownloadDialog
+
+        def done(item):
+            picker = self._ceremony_pickers.get(key)
+            if picker is not None and picker.winfo_exists():
+                picker.sound_id = library.PREFIX + item["id"]
+            self._refresh_pickers()
+            messagebox.showinfo("İndirildi", f"«{ceremony.name(key)}» indirildi ve seçildi. Kalıcı olması için "
+                                             "«Kaydet»e basın.", parent=self)
+        found = ceremony.find_in_library(ceremony.url_of(self.cfg, key))
+        if found and not messagebox.askyesno("Zaten indirilmiş", f"Bu ses kütüphanede zaten var "
+                                                                  f"(«{found['title']}»). Yeniden indirilsin mi?",
+                                             parent=self):
+            done(found)
+            return
+        CeremonyDownloadDialog(self, key, ceremony.url_of(self.cfg, key), done)
 
     def _tab_days(self, f):
         cfg = self.cfg

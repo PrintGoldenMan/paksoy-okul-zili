@@ -67,11 +67,49 @@ class Player:
         self._gen = 0
         self._current_kind = None
         self.playing = False
+        self._ceremony = None          # {"gen", "key", "title", "started", "length"} – tören sürerken
+        self._ceremony_lock = threading.Lock()
+        self.on_ceremony_end = None    # (başlık, çalabildi mi, durduruldu mu) – arka plan iş parçacığından
         threading.Thread(target=self._worker, name="zil-oynatici", daemon=True).start()
 
     @property
     def available(self) -> bool:
         return _HAVE_PYGAME and bool(pygame.mixer.get_init())
+
+    # -- tören (İstiklal Marşı) ----------------------------------------------------
+
+    def ceremony(self, key, sound_id, title, volume=100) -> None:
+        """Töreni başlatır: çalan zil ve bekleyen her şey kesilir. Tören bitene kadar zamanlayıcı
+        zilleri bekletir (ceremony_active)."""
+        with self._ceremony_lock:
+            self.stop()
+            length = sounds.length_seconds(sound_id)
+            start, end = sounds.part(sound_id)
+            if length:
+                length = max(0.0, min(end or length, length) - start) or None
+            self._ceremony = {"gen": self._gen, "key": key, "title": title, "started": time.monotonic(),
+                              "length": length}
+            self._queue.put((self._gen, "ceremony", sound_id, volume))
+
+    def ring_scheduled(self, event) -> bool:
+        """Zamanı gelen zili çalar; tören sürüyorsa çalmaz ve False döndürür (zamanlayıcı zili bekletir).
+        Kontrol ve kuyruğa ekleme tek kilit altındadır: tören tam o anda başlasa bile zil araya giremez."""
+        with self._ceremony_lock:
+            if self.ceremony_active:
+                return False
+            self.ring(event)
+            return True
+
+    @property
+    def ceremony_active(self) -> bool:
+        """Tören çalıyor ya da başlamak üzere. stop() nesli artırdığı için durdurulunca kendiliğinden biter."""
+        c = self._ceremony
+        return c is not None and c["gen"] == self._gen
+
+    @property
+    def ceremony_info(self):
+        c = self._ceremony
+        return dict(c) if c is not None and c["gen"] == self._gen else None
 
     def ring(self, event, announce=True) -> None:
         """Bir zil olayını (schedule.BellEvent) kuyruğa ekler."""
@@ -79,18 +117,27 @@ class Player:
 
     def preview_sound(self, sound_id: str, duration=None) -> None:
         """Sesi dinletir; süre verilirse zil gerçekte ne kadar çalacaksa o kadar çalar.
-        Gerçek bir zil çalıyorsa onu kesmez, arkasından çalar."""
+        Gerçek bir zil çalıyorsa onu kesmez, arkasından çalar. Tören sırasında hiç çalmaz."""
+        if self.ceremony_active:
+            log.info("Tören sürüyor; ses dinletilmedi")
+            return
         self.stop_preview()
         self._queue.put((self._gen, "sound", sound_id, duration))
 
     def preview_file(self, path, start=0.0, part_end=None, duration=None) -> None:
         """Bir dosyanın belirli bölümünü dinletir (kaydetmeden önce bölüm seçerken)."""
+        if self.ceremony_active:
+            log.info("Tören sürüyor; bölüm dinletilmedi")
+            return
         self.stop_preview()
         self._queue.put((self._gen, "file", str(path), (start, part_end, duration)))
 
     def say(self, text: str, tts_cfg=None, preview=False) -> None:
         """Metni okur. tts_cfg verilirse kayıtlı anons ayarları yerine o kullanılır (deneme için)."""
         if preview:
+            if self.ceremony_active:
+                log.info("Tören sürüyor; anons denemesi okunmadı")
+                return
             self.stop_preview()
         self._queue.put((self._gen, "trysay" if preview else "say", text, tts_cfg))
 
@@ -151,11 +198,40 @@ class Player:
                 elif kind in ("say", "trysay"):
                     self._set_state(True, "Anons")
                     self._announce(cfg if b is None else dict(cfg, tts=b), a, gen)
+                elif kind == "ceremony":
+                    self._play_ceremony(cfg, a, b, gen)
             except Exception as exc:  # noqa: BLE001 - oynatıcı asla durmamalı
                 log.exception("Çalma hatası: %s", exc)
             finally:
                 self._current_kind = None
                 self._set_state(False, "")
+
+    def _play_ceremony(self, cfg, sound_id, volume, gen):
+        info = self._ceremony if self._ceremony and self._ceremony["gen"] == gen else None
+        title = info["title"] if info else "Tören"
+        ok = False
+        try:
+            self._set_state(True, title)
+            path = sounds.resolve(sound_id)
+            if path is None:
+                log.error("Tören sesi bulunamadı: %s", sound_id)
+            else:
+                if info:
+                    info["started"] = time.monotonic()   # süre, sesin gerçekten başladığı andan sayılır
+                log.info("Tören başladı: %s", title)
+                start, part_end = sounds.part(sound_id)
+                # Uyarı sesi çalınmaz: marşın yerine bip sesi duyulması tören için uygunsuz olur.
+                ok = self._play_file(path, cfg["master_volume"] * volume / 100, gen, start=start, part_end=part_end)
+        finally:
+            stopped = self._cancelled(gen)
+            if self._ceremony is not None and self._ceremony["gen"] == gen:
+                self._ceremony = None
+            log.info("Tören %s: %s", "durduruldu" if stopped else ("bitti" if ok else "çalınamadı"), title)
+            if self.on_ceremony_end is not None:
+                try:
+                    self.on_ceremony_end(title, ok, stopped)
+                except Exception:  # noqa: BLE001
+                    log.exception("Tören bitiş bildirimi başarısız")
 
     def _set_state(self, playing, text):
         self.playing = playing

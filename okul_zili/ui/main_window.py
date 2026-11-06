@@ -10,7 +10,7 @@ import time
 import customtkinter as ctk
 from tkinter import messagebox
 
-from .. import APP_NAME, __version__, config, paths, rotation, schedule, sounds, system, updater
+from .. import APP_NAME, __version__, ceremony, config, paths, rotation, schedule, sounds, system, updater
 from ..config import BELL_NAMES, LEVEL_NAMES
 from ..turkish import long_date
 from . import theme
@@ -100,9 +100,17 @@ class MainWindow(ctk.CTk):
         height = self.winfo_height()
         if height <= 1:
             return
-        compact = height / scale < 700
-        if compact != self._compact:
-            self._layout(compact)
+        h = height / scale
+        if not self._compact:
+            # Elle çalma düğmeleri (özellikle «Sustur») sığmıyorsa da sıkışık düzene geçilir
+            # (ör. 1080p ekranda üstte uyarı şeridi varken).
+            body = self._ctrl_body
+            clipped = body.winfo_height() > 1 and body.winfo_height() + 2 < body.winfo_reqheight()
+            if h < 700 or clipped:
+                self._compact_at = h
+                self._layout(True)
+        elif h >= max(700, getattr(self, "_compact_at", 0) + 90):
+            self._layout(False)
 
     def _layout(self, compact):
         """Kısa ekranlarda (ör. 1366x768 ve %125 ölçek) daha sıkışık düzen kullanılır."""
@@ -116,6 +124,10 @@ class MainWindow(ctk.CTk):
             self.next_note.grid_remove()
         else:
             self.next_note.grid()
+        for btn in self.cer_btns.values():
+            btn.configure(height=34 if compact else 40, font=theme.font(13 if compact else 14, "bold"))
+        for btn in self.cer_btns.values():
+            btn.grid_configure(pady=8 if compact else 12)
         short = {"ogrenci": "Öğrenci", "ogretmen": "Öğretmen", "cikis": "Çıkış"}
         for kind, b in zip(config.BELL_TYPES, self.ring_btns):
             b.configure(text=short[kind] if compact else BELL_NAMES[kind])
@@ -302,8 +314,26 @@ class MainWindow(ctk.CTk):
         self.short_btn.pack(anchor="w", padx=18, pady=(4, 10))
 
     def _build_right(self):
-        card = Card(self, "Bugünkü Zil Çizelgesi")
-        card.grid(row=2, column=1, sticky="nsew", padx=(9, 18), pady=16)
+        right = ctk.CTkFrame(self, fg_color="transparent")
+        right.grid(row=2, column=1, sticky="nsew", padx=(9, 18), pady=16)
+        right.grid_columnconfigure(0, weight=1)
+        right.grid_rowconfigure(0, weight=1)
+        card = Card(right, "Bugünkü Zil Çizelgesi")
+        card.grid(row=0, column=0, sticky="nsew")
+
+        # Tören düğmeleri (İstiklal Marşı / Saygı Duruşu + İstiklal Marşı). Çizelge kaydırılabildiği için
+        # yer darsa o küçülür; soldaki «Sustur» düğmesi hep görünür kalır.
+        self.cer_row = ctk.CTkFrame(right, fg_color=theme.CARD_BG, corner_radius=16)
+        self.cer_row.grid_columnconfigure((0, 1), weight=1, uniform="t")
+        self.cer_btns = {}
+        for i, key in enumerate(ceremony.KEYS):
+            btn = ctk.CTkButton(self.cer_row, text=ceremony.name(key), height=40, font=theme.font(14, "bold"),
+                                fg_color=theme.CEREMONY, hover_color=theme.CEREMONY_HOVER,
+                                command=lambda k=key: self._ceremony_click(k))
+            btn.grid(row=0, column=i, sticky="ew", padx=(14, 5) if i == 0 else (5, 14), pady=12)
+            self.cer_btns[key] = btn
+        self._cer_state = None
+        self.cer_row.grid(row=1, column=0, sticky="ew", pady=(14, 0))
         self.day_info = ctk.CTkLabel(card.body, text="", text_color=theme.MUTED, anchor="w")
         self.day_info.grid(row=0, column=0, columnspan=2, sticky="ew")
         legend = ctk.CTkFrame(card.body, fg_color="transparent")
@@ -456,7 +486,9 @@ class MainWindow(ctk.CTk):
         self._check_size()
         self.app.check_rotation(now)
         self.app.check_calendar(now)
-        if self.app.cfg.get("keep_awake", True) and schedule.is_school_day(self.app.cfg, now.date()):
+        if self.app.player.ceremony_active:
+            system.set_keep_awake(True)   # tören okul saati dışında da yarıda kesilmesin
+        elif self.app.cfg.get("keep_awake", True) and schedule.is_school_day(self.app.cfg, now.date()):
             system.set_keep_awake(system.keep_awake_needed(self.app.scheduler.today_events(), now))
         else:
             system.set_keep_awake(False)
@@ -469,8 +501,13 @@ class MainWindow(ctk.CTk):
         self.date_lbl.configure(text=long_date(now.date()))
 
         title, detail, prog = schedule.current_status(cfg, now)
+        cer = self.app.player.ceremony_info
+        if cer:
+            title = f"{cer['title']} çalıyor"
+            detail = "Tören bitene kadar ziller çalmaz; zamanı gelen zil törenden sonra çalar."
         self.status_lbl.configure(text=title)
         self.status_detail.configure(text=detail)
+        self._update_ceremony(cfg, cer)
         if prog is None:
             self.progress.grid_remove()
         else:
@@ -553,8 +590,75 @@ class MainWindow(ctk.CTk):
     # -- olaylar ------------------------------------------------------------
 
     def _ring_now(self, kind):
+        if not self._interrupt_ceremony(f"{BELL_NAMES[kind]} çalınsın mı?"):
+            return
         if messagebox.askyesno("Zil çal", f"{BELL_NAMES[kind]} şimdi bütün okulda çalınsın mı?", parent=self):
             self.app.ring_now(kind)
+
+    def _interrupt_ceremony(self, question) -> bool:
+        """Tören çalıyorsa önce sorulur; onaylanırsa tören durdurulur. False: hiçbir şey yapma."""
+        cer = self.app.player.ceremony_info
+        if not cer:
+            return True
+        if not messagebox.askyesno("Tören sürüyor", f"Şu an «{cer['title']}» çalıyor.\n\nTören durdurulup "
+                                                    f"{question}", icon="warning",
+                                   default="no", parent=self):
+            return False
+        self.app.player.stop()
+        return True
+
+    # -- tören ---------------------------------------------------------------
+
+    def _ceremony_click(self, key):
+        from . import ceremony_ui
+        cer = self.app.player.ceremony_info
+        if cer:
+            if cer["key"] != key:
+                return   # öbür tören çalarken bu düğme kapalıdır
+            # Çift tıklama töreni başlar başlamaz durdurmasın.
+            if time.monotonic() - cer["started"] < 1.5:
+                return
+            self.app.player.stop()
+            self.flash(f"■  {cer['title']} durduruldu")
+            return
+
+        def start():
+            if self.app.player.ceremony_active:
+                return
+            if ceremony_ui.confirm_start(self, self.app, key):
+                self.app.start_ceremony(key)
+                self._update_ceremony(self.app.cfg, self.app.player.ceremony_info)
+        ceremony_ui.ensure_sound(self, self.app, key, start)
+
+    def _update_ceremony(self, cfg, cer):
+        show = (cfg.get("ceremony") or {}).get("show", True)
+        if show != bool(self.cer_row.winfo_manager()):
+            if show:
+                self.cer_row.grid()
+            else:
+                self.cer_row.grid_remove()
+        if cer:
+            left = ""
+            if cer.get("length"):
+                secs = max(0, int(cer["length"] - (time.monotonic() - cer["started"]) + 0.99))
+                left = f"  ({secs // 60}:{secs % 60:02d})"
+            state = ("play", cer["key"], left)
+        else:
+            state = ("idle", tuple(ceremony.is_ready(cfg, k) for k in ceremony.KEYS))
+        if state == self._cer_state:
+            return
+        self._cer_state = state
+        for key, btn in self.cer_btns.items():
+            if cer and key == cer["key"]:
+                btn.configure(text=f"■  Durdur{left}", state="normal", fg_color=theme.DANGER,
+                              hover_color=theme.DANGER_HOVER)
+            elif cer:
+                btn.configure(text=ceremony.name(key), state="disabled", fg_color=theme.CEREMONY,
+                              hover_color=theme.CEREMONY_HOVER)
+            else:
+                ready = ceremony.is_ready(cfg, key)
+                btn.configure(text=ceremony.name(key) + ("" if ready else "  ⬇"), state="normal",
+                              fg_color=theme.CEREMONY, hover_color=theme.CEREMONY_HOVER)
 
     def _toggle_auto(self):
         if not self.auto_var.get() and not messagebox.askyesno(
@@ -626,7 +730,7 @@ class MainWindow(ctk.CTk):
     def open_announce(self):
         dlg = ctk.CTkInputDialog(title="Anons Yap", text="Okunacak anons metnini yazın:")
         text = dlg.get_input()
-        if text and text.strip():
+        if text and text.strip() and self._interrupt_ceremony("anons okunsun mu?"):
             self.app.player.say(text.strip())
 
     # -- sistem tepsisi ----------------------------------------------------------

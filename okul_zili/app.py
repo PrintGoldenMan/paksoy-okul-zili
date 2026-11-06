@@ -10,7 +10,7 @@ import time
 
 import customtkinter as ctk
 
-from . import APP_NAME, __version__, autostart, config, meb_takvim, paths, rotation, sounds, system, updater
+from . import APP_NAME, __version__, autostart, ceremony, config, meb_takvim, paths, rotation, sounds, system, updater
 from .audio import Player
 from .config import BELL_NAMES, ring_seconds
 from .scheduler import BellScheduler
@@ -49,6 +49,7 @@ class App:
         self._rotation_checked = None
         self.now_playing = ""
         self.player = Player(lambda: self.cfg, on_state=self._on_player_state)
+        self.player.on_ceremony_end = self._on_ceremony_end
         self.scheduler = BellScheduler(lambda: self.cfg, self.player)
         self.window = None
         self.tray = None
@@ -101,6 +102,29 @@ class App:
     def _on_player_state(self, playing, text):
         self.now_playing = text if playing else ""
 
+    def start_ceremony(self, key):
+        """Ana ekrandaki tören düğmesi: sesin hazır olduğu ve kullanıcının onayladığı varsayılır."""
+        cer = self.cfg["ceremony"]
+        sound_id = ceremony.sound_of(self.cfg, key)
+        log.info("Tören başlatıldı (elle): %s", ceremony.name(key))
+        self.player.ceremony(key, sound_id, ceremony.name(key), volume=int(cer.get("volume", 100)))
+
+    def _on_ceremony_end(self, title, ok, stopped):
+        """Oynatıcının iş parçacığından çağrılır; arayüz işi ana iş parçacığına aktarılır."""
+        window = self.window
+        if window is None:
+            return
+        if not ok and not stopped:
+            def show():
+                from tkinter import messagebox
+                messagebox.showerror("Tören sesi çalınamadı",
+                                     f"«{title}» çalınamadı. Ses dosyası silinmiş ya da bozulmuş olabilir; hoparlörü "
+                                     "de kontrol edin.\n\nAyarlar → Zil Sesleri → Tören Sesleri bölümünden sesi "
+                                     "yeniden indirebilirsiniz.", parent=window)
+            window.ui_jobs.put(show)
+        elif ok and not stopped:
+            window.ui_jobs.put(lambda: window.flash(f"✓  {title} bitti"))
+
     def update_config(self, **changes):
         self.cfg.update(changes)
         self.apply_config(self.cfg)
@@ -113,6 +137,11 @@ class App:
         if keep_runtime:
             for key in self.RUNTIME_KEYS:
                 new_cfg[key] = self.cfg.get(key, new_cfg.get(key))
+            # Ayarlar penceresi açıkken ana ekrandan indirilen tören sesi, pencerenin eski
+            # (boş) seçimiyle ezilmesin.
+            for key in ceremony.KEYS:
+                if not ceremony.is_ready(new_cfg, key) and ceremony.is_ready(self.cfg, key):
+                    new_cfg["ceremony"]["items"][key]["sound"] = ceremony.sound_of(self.cfg, key)
         self.cfg = new_cfg
         rotation.update_all(self.cfg)   # havuz değiştiyse ya da yeni açıldıysa bu dönemin sesini seç
         try:
@@ -289,7 +318,13 @@ def self_test(out_path):
             pygame.mixer.music.load(out)
             pygame.mixer.music.unload()
             result["opus_playable"] = True
+        # Yalnızca gerektiğinde açılan pencereler de pakette olmalı (tören, hakkında).
+        for mod in ("okul_zili.ui.ceremony_ui", "okul_zili.ui.credits", "okul_zili.ui.short_day",
+                    "okul_zili.ui.setup_wizard"):
+            importlib.import_module(mod)
+        result["ui_modules"] = True
         if os.name == "nt":
+            importlib.import_module("PIL.ImageTk")           # geliştirici resmi (Hakkında)
             importlib.import_module("pystray._win32")       # sistem tepsisi
             from . import system
             result["volume"] = system.read_system_volume()  # Windows ses düzeyi (aygıt yoksa device=False)

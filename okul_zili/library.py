@@ -175,10 +175,13 @@ class Library:
         item_id = uuid.uuid4().hex[:12]
         return item_id, library_dir() / (short_file_stem(title, item_id) + ext)
 
-    def add(self, item_id: str, file_path: Path, title: str, duration=None, source: str = "") -> dict:
+    def add(self, item_id: str, file_path: Path, title: str, duration=None, source: str = "",
+            normalized=True) -> dict:
         item = {"id": item_id, "file": file_path.name, "title": short_title(title),
                 "full_title": (title or "").strip(), "duration": round(float(duration), 1) if duration else None,
                 "source": source, "added": time.strftime("%Y-%m-%d %H:%M")}
+        if not normalized:
+            item["normalized"] = False   # tören sesi: ses düzeyi eşitlenmeden, olduğu gibi kaydedildi
         with self._lock:
             self._items.append(item)
             self._save()

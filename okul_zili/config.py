@@ -143,6 +143,13 @@ DEFAULTS = {
     "short_day": {"date": None, "lesson_minutes": 30, "break_minutes": 10, "lunch_minutes": None},
     "meb_applied": {},           # {"2026-2027": "<takvim parmak izi>"} – takvimin hangi sürümü uygulandı
     "meb_auto": True,            # MEB takvimi internetten güncellenince tatiller kendiliğinden eklensin
+    # Tören düğmeleri (ana ekran): İstiklal Marşı / Saygı Duruşu + İstiklal Marşı (ceremony.py)
+    "ceremony": {
+        "show": True,            # ana ekranda düğmeler görünsün
+        "confirm": True,         # başlatmadan önce sor (yanlışlıkla basılmasın)
+        "volume": 100,           # genel ses düzeyine göre yüzde
+        "items": {"istiklal": {"sound": "", "url": ""}, "saygi": {"sound": "", "url": ""}},
+    },
     "autostart": False,
 }
 
@@ -236,6 +243,21 @@ def _sanitize(cfg: dict) -> dict:
             second["timing"] = copy.deepcopy(DEFAULTS["second_shift"]["timing"])
     if not isinstance(cfg.get("short_day"), dict):
         cfg["short_day"] = copy.deepcopy(DEFAULTS["short_day"])
+    cer = cfg.get("ceremony")
+    if not isinstance(cer, dict) or not isinstance(cer.get("items"), dict):
+        cfg["ceremony"] = cer = dict(cer if isinstance(cer, dict) else {},
+                                     items=copy.deepcopy(DEFAULTS["ceremony"]["items"]))
+    for key, default in DEFAULTS["ceremony"]["items"].items():
+        item = cer["items"].get(key)
+        if not isinstance(item, dict):
+            item = cer["items"][key] = copy.deepcopy(default)
+        for field in ("sound", "url"):
+            if not isinstance(item.get(field), str):
+                item[field] = ""
+    try:
+        cer["volume"] = max(10, min(100, int(cer.get("volume", 100))))
+    except (TypeError, ValueError):
+        cer["volume"] = 100
     disabled = cfg.get("disabled_bells") if isinstance(cfg.get("disabled_bells"), dict) else {}
     cfg["disabled_bells"] = {str(k): [x for x in v if isinstance(x, str)]
                              for k, v in disabled.items() if isinstance(v, list)}

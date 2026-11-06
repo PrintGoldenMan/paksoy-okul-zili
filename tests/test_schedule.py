@@ -186,9 +186,16 @@ class ConfigFileTests(unittest.TestCase):
 class FakePlayer:
     def __init__(self):
         self.rung = []
+        self.ceremony_active = False
 
     def ring(self, event, announce=True):
         self.rung.append(event.time_str + " " + event.kind)
+
+    def ring_scheduled(self, event):
+        if self.ceremony_active:
+            return False
+        self.ring(event)
+        return True
 
 
 class SchedulerTests(unittest.TestCase):

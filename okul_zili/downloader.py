@@ -439,26 +439,27 @@ def parse_section(start_text: str, end_text: str, duration=None):
 
 # -- indirme ve dönüştürme ----------------------------------------------------------------------
 
-def download(url: str, title_hint: str = "", progress=None, cancel=None, section=None) -> dict:
+def download(url: str, title_hint: str = "", progress=None, cancel=None, section=None, normalize=True) -> dict:
     """Tek bir sesi indirip kütüphaneye ekler; eklenen kaydı döndürür.
 
     section=(başlangıç, bitiş) verilirse yalnızca o bölüm kaydedilir. Site izin veriyorsa yt-dlp
-    yalnızca o bölümü indirir (uzun videolarda çok daha hızlı); olmazsa tamamı indirilip kesilir."""
+    yalnızca o bölümü indirir (uzun videolarda çok daha hızlı); olmazsa tamamı indirilip kesilir.
+    normalize=False: ses olduğu gibi kaydedilir (tören sesleri: sessiz bölümler korunur)."""
     _check_restart()
     import yt_dlp
     if _is_youtube(url):
         ensure_js_runtime(progress, cancel)
     if section:
         try:
-            return _download(yt_dlp, url, title_hint, progress, cancel, section, partial=True)
+            return _download(yt_dlp, url, title_hint, progress, cancel, section, partial=True, normalize=normalize)
         except Cancelled:
             raise
         except DownloadError as exc:
             log.warning("Bölüm indirilemedi, tamamı indirilip kesilecek: %s", str(exc).splitlines()[0])
-    return _download(yt_dlp, url, title_hint, progress, cancel, section, partial=False)
+    return _download(yt_dlp, url, title_hint, progress, cancel, section, partial=False, normalize=normalize)
 
 
-def _download(yt_dlp, url, title_hint, progress, cancel, section, partial):
+def _download(yt_dlp, url, title_hint, progress, cancel, section, partial, normalize=True):
 
     def hook(d):
         if cancel is not None and cancel.is_set():
@@ -510,7 +511,7 @@ def _download(yt_dlp, url, title_hint, progress, cancel, section, partial):
         if progress:
             progress(0.88, "Ses dönüştürülüyor…")
         return _convert_and_add(src, title, source=info.get("webpage_url") or url, cancel=cancel, cut=cut,
-                                trim_silence=section is None)
+                                trim_silence=section is None, normalize=normalize)
 
 
 def import_file(path: str, cancel=None) -> dict:
@@ -519,7 +520,8 @@ def import_file(path: str, cancel=None) -> dict:
     return _convert_and_add(path, title, source=f"Bilgisayardan: {Path(path).name}", cancel=cancel)
 
 
-def _convert_and_add(src: str, title: str, source: str, cancel=None, cut=None, trim_silence=True) -> dict:
+def _convert_and_add(src: str, title: str, source: str, cancel=None, cut=None, trim_silence=True,
+                     normalize=True) -> dict:
     lib = library.get_library()
     item_id, target = lib.new_target(title)
     tmp = target.with_name(target.stem + ".part.opus")
@@ -528,9 +530,10 @@ def _convert_and_add(src: str, title: str, source: str, cancel=None, cut=None, t
     filters = "loudnorm=I=-14:TP=-1.5:LRA=11"
     if trim_silence:
         filters = "silenceremove=start_periods=1:start_threshold=-50dB," + filters
+    af = ["-af", filters] if normalize else []
     seek = ["-ss", f"{cut[0]:.3f}", "-to", f"{cut[1]:.3f}"] if cut else []
     cmd = [ffmpeg_exe(), "-hide_banner", "-loglevel", "error", "-y", *seek, "-i", src, "-vn", "-sn", "-dn",
-           "-af", filters, "-ar", "48000", "-ac", "2", "-c:a", "libopus", "-b:a", OPUS_BITRATE, "-f", "opus", str(tmp)]
+           *af, "-ar", "48000", "-ac", "2", "-c:a", "libopus", "-b:a", OPUS_BITRATE, "-f", "opus", str(tmp)]
     proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, **_hidden_window_flags())
     while True:
         try:
@@ -552,7 +555,7 @@ def _convert_and_add(src: str, title: str, source: str, cancel=None, cut=None, t
         raise DownloadError("Ortaya çıkan ses boş: seçilen bölüm sesin dışında kalıyor ya da ses tamamen sessiz. "
                             "Başka bir bölüm ya da başka bir ses deneyin.")
     tmp.replace(target)
-    return lib.add(item_id, target, title, duration=length, source=source)
+    return lib.add(item_id, target, title, duration=length, source=source, normalized=normalize)
 
 
 def _duration(path: Path):
