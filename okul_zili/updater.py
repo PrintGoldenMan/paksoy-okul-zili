@@ -230,3 +230,16 @@ def clear_updating_mark():
     except OSError:
         pass
 
+
+def note_installed_version():
+    """Linux: kur.sh kurulu sürümü programı çalıştırmadan yanındaki .okulzili.surum dosyasından okur;
+    program kendini güncellediyse dosya da güncellensin (yalnızca kur.sh ile kurulmuşsa: dosya varsa)."""
+    if install_kind() != "linux":
+        return
+    note = Path(sys.executable).with_name(".okulzili.surum")
+    try:
+        if note.is_file() and note.read_text(encoding="utf-8").strip() != __version__:
+            note.write_text(__version__ + "\n", encoding="utf-8")
+    except OSError:
+        pass
+

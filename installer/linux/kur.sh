@@ -9,6 +9,7 @@
 #   bash kur.sh --kaldir           Programı kaldırır (ayarlar ve sesler kalır)
 #   bash kur.sh --kaldir --verileri-de-sil   Programı ve bütün verilerini kaldırır
 #   bash kur.sh --evet             Hiçbir şey sormaz, önerilen seçenekleri kullanır
+#   bash kur.sh --yonetici-olarak  root kullanıcısının kendisine kurmak için (sudo ile kurmayın)
 #   bash kur.sh --yardim
 #
 # Program ~/.local/bin/okulzili olarak kurulur ve uygulama menüsüne eklenir. Ayarlar ve sesler
@@ -24,6 +25,8 @@ VERI_KOK="${XDG_DATA_HOME:-$HOME/.local/share}"
 AYAR_KOK="${XDG_CONFIG_HOME:-$HOME/.config}"
 BIN="$HOME/.local/bin"
 PROGRAM="$BIN/okulzili"
+SURUM_DOSYASI="$BIN/.okulzili.surum"   # kurulu sürüm (program çalıştırılmadan okunur)
+YENI="$BIN/.okulzili.yeni"             # yerine konmayı bekleyen yeni program
 UYGULAMALAR="$VERI_KOK/applications"
 SIMGELER="$VERI_KOK/icons/hicolor/256x256/apps"
 MASAUSTU="$UYGULAMALAR/okulzili.desktop"
@@ -39,7 +42,7 @@ if [ -d "$ESKI_VERI" ]; then VERI="$ESKI_VERI"; else VERI="$VERI_KOK/OkulZili"; 
 AYARLAR="$VERI/ayarlar.json"
 
 # -- seçenekler -------------------------------------------------------------------------------------
-ISLEM="kur"; SIFIRLA=""; EVET=0; VERILERI_SIL=0
+ISLEM="kur"; SIFIRLA=""; EVET=0; VERILERI_SIL=0; YONETICI=0
 for arg in "$@"; do
     case "$arg" in
         --kaldir) ISLEM="kaldir" ;;
@@ -48,7 +51,8 @@ for arg in "$@"; do
         --sifirla-hepsi) SIFIRLA="hepsi" ;;
         --verileri-de-sil) VERILERI_SIL=1 ;;
         --evet|-y) EVET=1 ;;
-        --yardim|-h|--help) sed -n '2,15p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        --yonetici-olarak) YONETICI=1 ;;
+        --yardim|-h|--help) sed -n '2,16p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "Bilinmeyen seçenek: $arg (yardım için: bash kur.sh --yardim)" >&2; exit 2 ;;
     esac
 done
@@ -68,6 +72,12 @@ hata()   { printf '  %s✗%s %s\n' "$K" "$N" "$1"; }
 bilgi()  { printf '    %s\n' "$1"; }
 olumcul() { printf '\n%sHata:%s %s\n' "$K" "$N" "$1" >&2; exit 1; }
 var() { command -v "$1" >/dev/null 2>&1; }
+
+# sudo ile çalıştırılırsa ~/.local altındaki dosyalar root'a ait olur, program kendini güncelleyemez.
+if [ "${EUID:-$(id -u)}" = 0 ] && [ "$YONETICI" = 0 ]; then
+    olumcul "kur.sh'yi sudo olmadan, kendi kullanıcınızla çalıştırın: bash kur.sh
+       (Gerçekten root kullanıcısının kendisine kurmak için: bash kur.sh --yonetici-olarak)"
+fi
 
 kayit() {
     mkdir -p "$VERI" 2>/dev/null || return 0
@@ -91,9 +101,16 @@ evet_mi() {
 # surum_buyuk A B → A, B'den yeniyse doğru
 surum_buyuk() { [ "$1" != "$2" ] && [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | tail -n1)" = "$1" ]; }
 
-surum_oku() {   # $1: program dosyası → sürüm (okunamazsa boş)
+surum_oku() {   # $1: paketteki (yeni) program → sürüm (okunamazsa boş)
     [ -x "$1" ] || return 0
     timeout 20 "$1" --version 2>/dev/null | tail -n1 | tr -d '[:space:]' | grep -E '^[0-9]+(\.[0-9]+)+$' || true
+}
+
+kurulu_surum() {   # $1: kurulu program → yanındaki sürüm dosyasından sürüm (yoksa boş)
+    # Kurulu program asla çalıştırılmaz: 1.4.2 ve öncesi --version bilmez, programın kendisi açılırdı.
+    local dosya; dosya="$(dirname "$1")/.okulzili.surum"
+    [ -f "$dosya" ] || return 0
+    head -n1 "$dosya" 2>/dev/null | tr -d '[:space:]' | grep -E '^[0-9]+(\.[0-9]+)+$' || true
 }
 
 calisan_pidler() { pgrep -x -u "$(id -u)" okulzili 2>/dev/null || true; }
@@ -101,6 +118,23 @@ calisan_pidler() { pgrep -x -u "$(id -u)" okulzili 2>/dev/null || true; }
 ayar_degeri() {   # ayarlar.json içinden basit bir metin değeri (python gerekmeden)
     [ -f "$AYARLAR" ] || return 0
     grep -o "\"$1\": *\"[^\"]*\"" "$AYARLAR" 2>/dev/null | head -n1 | sed 's/.*: *"//; s/"$//'
+}
+
+exec_yolu() {   # Desktop Entry «Exec» değerinden program yolu (masaustu_exec'in tersi)
+    # Tırnaklıysa kapanış tırnağına kadar (kaçışlar çözülür), değilse ilk boşluğa kadar.
+    local v c yol=""
+    v="$(printf '%s' "$1" | sed -e 's/\\\\/\\/g' -e 's/%%/%/g')"
+    if [ "${v:0:1}" != '"' ]; then printf '%s' "${v%% *}"; return; fi
+    v="${v:1}"
+    while [ -n "$v" ]; do
+        c="${v:0:1}"; v="${v:1}"
+        case "$c" in
+            \\) c="${v:0:1}"; v="${v:1}" ;;
+            '"') break ;;
+        esac
+        yol+="$c"
+    done
+    printf '%s' "$yol"
 }
 
 masaustu_exec() {   # Desktop Entry «Exec» değeri (okul_zili/autostart.py desktop_exec ile aynı kurallar)
@@ -207,25 +241,28 @@ paket_oner() {
 }
 
 # -- mevcut kurulumu bul ----------------------------------------------------------------------------
-ESKI_SURUM=""; DIGER_KOPYALAR=()
+ESKI_SURUM=""; ESKI_AD=""; ILK_KURULUM=0; DIGER_KOPYALAR=()
 
 mevcut_kurulum() {
     baslik "Mevcut kurulum"
-    ESKI_SURUM="$(surum_oku "$PROGRAM")"
-    if [ -n "$ESKI_SURUM" ]; then iyi "Kurulu sürüm: $ESKI_SURUM ($PROGRAM)"
-    elif [ -e "$PROGRAM" ]; then uyari "$PROGRAM var ama sürümü okunamadı (çok eski ya da bozuk); yerine yenisi yazılacak"
+    ESKI_SURUM=""; ESKI_AD=""
+    [ -e "$PROGRAM" ] && ESKI_SURUM="$(kurulu_surum "$PROGRAM")"
+    if [ -n "$ESKI_SURUM" ]; then ESKI_AD="$ESKI_SURUM"; iyi "Kurulu sürüm: $ESKI_SURUM ($PROGRAM)"
+    elif [ -e "$PROGRAM" ]; then
+        # Sürüm dosyası bu kurulum betiğiyle geldi: yoksa program daha eski bir yolla kurulmuştur.
+        ESKI_AD="1.5.0 öncesi"; iyi "Kurulu sürüm: 1.5.0 öncesi ($PROGRAM); yenisiyle değiştirilecek"
     else bilgi "Program daha önce bu kullanıcıya kurulmamış."; fi
 
     # Başka yerlerdeki kopyalar: PATH, otomatik başlatma ve bekçinin gösterdiği yollar
     local yol aday
     for aday in "$(command -v okulzili 2>/dev/null || true)" \
-                "$(grep -m1 '^Exec=' "$OTOMATIK" 2>/dev/null | sed 's/^Exec=//; s/^"//; s/".*//; s/ .*//')" \
+                "$(exec_yolu "$(grep -m1 '^Exec=' "$OTOMATIK" 2>/dev/null | sed 's/^Exec=//')")" \
                 "$(grep -m1 '^ExecStart=' "$SYSTEMD/$BEKCI.service" 2>/dev/null | sed 's/^ExecStart=//; s/^"//; s/".*//')"; do
         yol="$aday"
         [ -n "$yol" ] && [ "$yol" != "$PROGRAM" ] || continue
         case " ${DIGER_KOPYALAR[*]:-} " in *" $yol "*) continue ;; esac
         DIGER_KOPYALAR+=("$yol")
-        if [ -e "$yol" ]; then uyari "Başka bir kopya kullanılıyor: $yol ($(surum_oku "$yol"))"
+        if [ -e "$yol" ]; then uyari "Başka bir kopya kullanılıyor: $yol ($(kurulu_surum "$yol" | grep . || echo "sürümü bilinmiyor"))"
         else uyari "Eski bir kayıt artık olmayan bir dosyayı gösteriyor: $yol"; fi
     done
     [ "${#DIGER_KOPYALAR[@]}" -gt 0 ] && bilgi "Otomatik başlatma ve bekçi yeni kuruluma yönlendirilecek."
@@ -238,6 +275,7 @@ mevcut_kurulum() {
         bilgi "Kütüphanede $n ses · veri klasörü $(du -sh "$VERI" 2>/dev/null | cut -f1)"
         [ "$VERI" = "$ESKI_VERI" ] && bilgi "Eski sürümlerin veri klasörü kullanılıyor ($ESKI_VERI); olduğu gibi korunur."
     else
+        ILK_KURULUM=1
         bilgi "Kayıtlı ayar yok (ilk açılışta kurulum sihirbazı açılır)."
     fi
 
@@ -247,9 +285,23 @@ mevcut_kurulum() {
 }
 
 # -- program durdurma / başlatma ---------------------------------------------------------------------
-BEKCI_ACIKTI=0; CALISIYORDU=0
+BEKCI_ACIKTI=0; CALISIYORDU=0; DURDURULDU=0; BITTI=0
+
+geri_al() {   # kurulum durdurduktan sonra yarıda kalırsa (hata, Ctrl-C) ziller susmasın
+    rm -f "$YENI" 2>/dev/null
+    [ "$DURDURULDU" = 1 ] && [ "$BITTI" = 0 ] || return 0
+    BITTI=1
+    printf '\n%sKurulum yarıda kaldı;%s eski durum geri getiriliyor.\n' "$S" "$N" >&2
+    if [ "$BEKCI_ACIKTI" = 1 ]; then systemctl --user start "$BEKCI.timer" 2>/dev/null || true; fi
+    if [ "$CALISIYORDU" = 1 ] && [ -x "$PROGRAM" ]; then
+        for _ in $(seq 1 10); do [ -z "$(calisan_pidler)" ] && break; sleep 0.5; done
+        [ -z "$(calisan_pidler)" ] && baslat --oz-restart   # hâlâ açıksa kapatılamamıştı: dokunulmaz
+    fi
+    kayit "Kurulum yarıda kaldı (bekçi ve program yeniden başlatıldı)"
+}
 
 durdur() {
+    DURDURULDU=1
     if var systemctl && systemctl --user is-active --quiet "$BEKCI.timer" 2>/dev/null; then
         BEKCI_ACIKTI=1
         systemctl --user stop "$BEKCI.timer" 2>/dev/null || true   # kurulum sırasında eski programı açmasın
@@ -278,7 +330,8 @@ baslat() {
 verileri_yedekle() {   # güncellemeden önce ayarların bir kopyası
     [ -f "$AYARLAR" ] || return 0
     mkdir -p "$VERI/yedekler"
-    local hedef; hedef="$VERI/yedekler/ayarlar-${ESKI_SURUM:-eski}-$(date +%Y%m%d-%H%M%S).json"
+    local surum="${ESKI_AD:-eski}"
+    local hedef; hedef="$VERI/yedekler/ayarlar-${surum// /-}-$(date +%Y%m%d-%H%M%S).json"
     cp -p "$AYARLAR" "$hedef" && iyi "Ayarlar yedeklendi: $hedef"
     # en fazla 10 yedek tutulur
     ls -1t "$VERI/yedekler"/ayarlar-*.json 2>/dev/null | tail -n +11 | xargs -r rm -f
@@ -319,18 +372,26 @@ sifirla() {
 }
 
 # -- kurulum -----------------------------------------------------------------------------------------
-dosyalari_kur() {
-    local yeni="$PAKET_DIZINI/okulzili"
-    [ -f "$yeni" ] || olumcul "«okulzili» dosyası bu klasörde yok. Betiği paketi açtığınız klasörde çalıştırın."
+paketi_dogrula() {
+    [ -f "$PAKET_DIZINI/okulzili" ] || olumcul "«okulzili» dosyası bu klasörde yok. Betiği paketi açtığınız klasörde çalıştırın."
     if [ -f "$PAKET_DIZINI/SHA256SUMS" ] && var sha256sum; then
         (cd "$PAKET_DIZINI" && sha256sum --quiet -c SHA256SUMS) \
             || olumcul "Paket dosyaları bozuk (SHA256 tutmuyor). Paketi yeniden indirin."
         iyi "Paket bütünlüğü doğrulandı (SHA256)"
     fi
-    mkdir -p "$BIN" "$UYGULAMALAR" "$SIMGELER"
+}
+
+paketi_hazirla() {   # çalışan program durdurulmadan önce: yer yoksa ya da yazılamıyorsa hiçbir şey değişmez
+    mkdir -p "$BIN" || olumcul "$BIN oluşturulamadı."
     # Önce geçici ada kopyalanır, sonra tek adımda yerine konur (yarım kalmış dosya olmaz).
-    install -m 755 "$yeni" "$BIN/.okulzili.yeni" || olumcul "$BIN içine yazılamadı."
-    mv -f "$BIN/.okulzili.yeni" "$PROGRAM"
+    trap geri_al EXIT; trap 'exit 130' INT; trap 'exit 143' TERM
+    install -m 755 "$PAKET_DIZINI/okulzili" "$YENI" || olumcul "$BIN içine yazılamadı (disk dolu olabilir)."
+}
+
+dosyalari_kur() {
+    mkdir -p "$UYGULAMALAR" "$SIMGELER"
+    mv -f "$YENI" "$PROGRAM" || olumcul "Program yerine konamadı: $PROGRAM"
+    printf '%s\n' "$YENI_SURUM" > "$SURUM_DOSYASI" || uyari "Sürüm dosyası yazılamadı: $SURUM_DOSYASI"
     [ -f "$PAKET_DIZINI/okulzili.png" ] && install -m 644 "$PAKET_DIZINI/okulzili.png" "$SIMGELER/okulzili.png"
     cat > "$MASAUSTU" <<MASAUSTU
 [Desktop Entry]
@@ -350,9 +411,11 @@ MASAUSTU
 }
 
 otomatik_baslatma() {
-    local acik=0
+    local acik=0 onerilen=E
     if [ -f "$OTOMATIK" ] && ! grep -q '^Hidden=true' "$OTOMATIK"; then acik=1; fi
-    if [ "$acik" = 1 ] || evet_mi "  Bilgisayar açılınca Okul Zili kendiliğinden başlasın mı? (önerilir)" E; then
+    # Güncellemede kayıt yoksa kullanıcı Ayarlar'dan kapatmıştır: --evet ile yeniden açılmaz.
+    [ "$ILK_KURULUM" = 1 ] || onerilen=H
+    if [ "$acik" = 1 ] || evet_mi "  Bilgisayar açılınca Okul Zili kendiliğinden başlasın mı? (önerilir)" "$onerilen"; then
         mkdir -p "$(dirname "$OTOMATIK")"
         cat > "$OTOMATIK" <<OTO
 [Desktop Entry]
@@ -375,8 +438,12 @@ bekci_yonlendir() {
     # Bekçi birimi başka bir kopyayı gösteriyorsa yeni programa çevrilir (program da açılışta yeniler).
     local birim="$SYSTEMD/$BEKCI.service"
     [ -f "$birim" ] || return 0
-    if ! grep -q "ExecStart=.*$(printf '%s' "$PROGRAM" | sed 's/[.[\*^$/]/\\&/g')" "$birim"; then
-        sed -i "s|^ExecStart=.*|ExecStart=\"$PROGRAM\" \"--oz-watchdog\"|" "$birim"
+    # okul_zili/system.py systemd_quote ile aynı kaçışlar; sed için de \ & | kaçırılır.
+    local yol satir
+    yol="$(printf '%s' "$PROGRAM" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e 's/%/%%/g' -e 's/\$/$$/g')"
+    satir="ExecStart=\"$yol\" \"--oz-watchdog\""
+    if ! grep -qF "ExecStart=\"$yol\"" "$birim"; then
+        sed -i "s|^ExecStart=.*|$(printf '%s' "$satir" | sed 's/[\\&|]/\\&/g')|" "$birim"
         systemctl --user daemon-reload 2>/dev/null || true
         iyi "Bekçi yeni programa yönlendirildi"
     fi
@@ -386,22 +453,28 @@ kur() {
     printf '%sOkul Zili – Linux kurulumu%s\n' "$B" "$N"
     sistemi_denetle || olumcul "Bu bilgisayar desteklenmiyor."
     mevcut_kurulum
-    local yeni_surum; yeni_surum="$(surum_oku "$PAKET_DIZINI/okulzili")"
-    [ -n "$yeni_surum" ] || olumcul "Paketteki program çalıştırılamadı (dosya bozuk olabilir)."
+    baslik "Paket"
+    paketi_dogrula
+    YENI_SURUM="$(surum_oku "$PAKET_DIZINI/okulzili")"
+    [ -n "$YENI_SURUM" ] || olumcul "Paketteki program çalıştırılamadı (dosya bozuk olabilir)."
 
-    baslik "Kurulacak sürüm: $yeni_surum"
+    baslik "Kurulacak sürüm: $YENI_SURUM"
     if [ -n "$ESKI_SURUM" ]; then
-        if surum_buyuk "$yeni_surum" "$ESKI_SURUM"; then
-            iyi "Güncelleme: $ESKI_SURUM → $yeni_surum (ayarlar ve sesler korunur)"
-        elif [ "$yeni_surum" = "$ESKI_SURUM" ]; then
+        if surum_buyuk "$YENI_SURUM" "$ESKI_SURUM"; then
+            iyi "Güncelleme: $ESKI_SURUM → $YENI_SURUM (ayarlar ve sesler korunur)"
+        elif [ "$YENI_SURUM" = "$ESKI_SURUM" ]; then
             evet_mi "  Bu sürüm zaten kurulu. Yeniden kurulsun mu?" E || { bilgi "Değişiklik yapılmadı."; exit 0; }
         else
-            uyari "Kurulu sürüm ($ESKI_SURUM) bu paketten ($yeni_surum) daha yeni."
+            uyari "Kurulu sürüm ($ESKI_SURUM) bu paketten ($YENI_SURUM) daha yeni."
             evet_mi "  Yine de eski sürüme dönülsün mü?" H || { bilgi "Değişiklik yapılmadı."; exit 0; }
         fi
+    elif [ -n "$ESKI_AD" ]; then
+        iyi "Güncelleme: $ESKI_AD → $YENI_SURUM (ayarlar ve sesler korunur)"
     fi
 
     sifirlama_sor
+    # Yeni program yerine konmaya hazır olmadan çalışan program ve bekçi durdurulmaz.
+    paketi_hazirla
     durdur
     [ "$SIFIRLA" = koru ] || [ -z "$SIFIRLA" ] && verileri_yedekle
     sifirla
@@ -410,8 +483,9 @@ kur() {
     otomatik_baslatma
     bekci_yonlendir
     if [ "$BEKCI_ACIKTI" = 1 ]; then systemctl --user start "$BEKCI.timer" 2>/dev/null || true; fi
+    BITTI=1
     paket_oner
-    kayit "Kuruldu: ${ESKI_SURUM:-yok} → $yeni_surum (veriler: ${SIFIRLA:-koru})"
+    kayit "Kuruldu: ${ESKI_AD:-yok} → $YENI_SURUM (veriler: ${SIFIRLA:-koru})"
 
     baslik "Tamam"
     if [ "$CALISIYORDU" = 1 ]; then
@@ -432,15 +506,19 @@ kaldir() {
     evet_mi "  Okul Zili kaldırılsın mı?" E || { bilgi "Vazgeçildi."; exit 0; }
     durdur
     if var systemctl; then systemctl --user disable --now "$BEKCI.timer" >/dev/null 2>&1 || true; fi
-    rm -f "$PROGRAM" "$MASAUSTU" "$SIMGELER/okulzili.png" "$OTOMATIK" "$SYSTEMD/$BEKCI.service" "$SYSTEMD/$BEKCI.timer"
+    rm -f "$PROGRAM" "$SURUM_DOSYASI" "$MASAUSTU" "$SIMGELER/okulzili.png" "$OTOMATIK" "$SYSTEMD/$BEKCI.service" "$SYSTEMD/$BEKCI.timer"
     var systemctl && systemctl --user daemon-reload >/dev/null 2>&1
     var update-desktop-database && update-desktop-database "$UYGULAMALAR" >/dev/null 2>&1
     iyi "Program kaldırıldı."
-    if [ -d "$VERI" ]; then
+    # «Her şeyi sıfırla» ile saklanan eski veri klasörleri de verilerdendir.
+    local veriler=() d
+    for d in "$VERI" "$VERI".yedek-*; do [ -d "$d" ] && veriler+=("$d"); done
+    if [ "${#veriler[@]}" -gt 0 ]; then
         if [ "$VERILERI_SIL" = 1 ] || { [ "$EVET" = 0 ] && evet_mi "  Ayarlar ve sesler de silinsin mi? (geri alınamaz)" H; }; then
-            rm -rf "$VERI" && iyi "Ayarlar ve sesler silindi."
+            for d in "${veriler[@]}"; do rm -rf "$d" && iyi "Silindi: $d"; done
+            iyi "Ayarlar ve sesler silindi."
         else
-            bilgi "Ayarlar ve sesler duruyor: $VERI (yeniden kurulursa kaldığı yerden devam eder)."
+            bilgi "Ayarlar ve sesler duruyor: ${veriler[*]} (yeniden kurulursa kaldığı yerden devam eder)."
         fi
     fi
 }

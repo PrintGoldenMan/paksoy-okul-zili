@@ -62,7 +62,9 @@ class BellScheduler:
         self._get_config = get_config
         self._player = player
         self._on_ring = on_ring or (lambda event: None)
-        self._fired = set()
+        self._fired = set()        # bugün çalınan ya da zamanı geçmiş sayılan ziller
+        self._handled = set()      # gerçekten işlenen ziller (çaldı, bekletildi, kapalı diye atlandı): (tarih, anahtar)
+        self._clock_version = None
         self._date = None
         self._events = []
         self._dirty = True
@@ -99,22 +101,37 @@ class BellScheduler:
 
     def _refresh(self, now):
         with self._lock:
-            if not self._dirty and self._date == now.date():
+            version = clock.version()
+            if not self._dirty and self._date == now.date() and version == self._clock_version:
                 return
             if self._date != now.date():
-                self._fired.clear()
                 self._held.clear()
+                # Saat kaynağı tarihi geri alabilir: dünün/yarının işlenen zilleri unutulmasın.
+                self._handled = {h for h in self._handled if abs((h[0] - now.date()).days) <= 1}
             cfg = self._get_config()
             self._date = now.date()
             self._dirty = False
+            self._clock_version = version
             self._events = safe_events(cfg, self._date)
-            # Program açıldığında zamanı çoktan geçmiş zilleri "çalındı" say.
+            # Zamanı çoktan geçmiş zilleri "çalındı" say. Saat sıçradıysa (ör. internet saati geldi) bu
+            # yeni saate göre yeniden hesaplanır; gerçekten çalınan ziller yine de bir daha çalmaz.
             sec = now.hour * 3600 + now.minute * 60 + now.second
+            self._fired = {key for date, key in self._handled if date == self._date}
             for e in self._events:
                 if sec - e.minute * 60 > _grace(cfg):
                     self._fired.add(e.key)
             if cfg["tts"].get("enabled") and cfg.get("prepare_announcements", True):
                 tts.prepare_async([e.text for e in self._events if e.tts and not e.off], cfg["tts"])
+
+    def _claim(self, event, handled):
+        """Zil işaretlenir; başka iş parçacığı _fired'ı yeniden hesaplarken kaybolmasın diye kilitli."""
+        with self._lock:
+            if event.key in self._fired:
+                return False
+            self._fired.add(event.key)
+            if handled:
+                self._handled.add((self._date, event.key))
+            return True
 
     def _loop(self):
         stop = threading.Event()
@@ -169,7 +186,8 @@ class BellScheduler:
                 continue
             delta = sec - e.minute * 60
             if 0 <= delta <= grace:
-                self._fired.add(e.key)
+                if not self._claim(e, handled=True):
+                    continue
                 if e.off:
                     log.info("Zil kapalı (%s), çalınmadı: %s %s", e.off, e.time_str, e.label)
                 elif not cfg.get("auto_ring", True):
@@ -184,4 +202,4 @@ class BellScheduler:
                     self._release_at = None
                 self._on_ring(e)
             elif delta > grace:
-                self._fired.add(e.key)
+                self._claim(e, handled=False)

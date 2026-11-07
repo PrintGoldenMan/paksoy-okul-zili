@@ -19,6 +19,31 @@ class DesktopExecTests(unittest.TestCase):
         # « " » ve « $ » tırnak içinde kaçırılır; ters eğik çizgiler dize değeri için bir kez daha kaçırılır.
         self.assertEqual(autostart.desktop_exec(['/p/a"b$c%d']), '"/p/a\\\\"b\\\\$c%%d"')
 
+    @unittest.skipUnless(sys.platform.startswith("linux"), "yalnızca Linux")
+    def test_installer_reads_back_exec_path(self):
+        # kur.sh exec_yolu, programın yazdığı Exec değerinden yolu doğru çıkarmalı (boşluk, tırnak, kaçış).
+        script = os.path.join(os.path.dirname(__file__), "..", "installer", "linux", "kur.sh")
+        for path in ("/home/a/.local/bin/okulzili", "/home/a b/.local/bin/okulzili", '/p/a"b$c%d`e\\f g'):
+            value = autostart.desktop_exec([path, autostart.BACKGROUND_FLAG])
+            out = subprocess.run(["bash", "-c", 'eval "$(sed -n "/^exec_yolu() {/,/^}/p" "$1")"; exec_yolu "$2"',
+                                  "_", script, value], capture_output=True, text=True, check=True).stdout
+            self.assertEqual(out, path)
+
+    def test_installed_version_note(self):
+        from okul_zili import __version__, updater
+        with tempfile.TemporaryDirectory() as tmp:
+            exe = os.path.join(tmp, "okulzili")
+            note = os.path.join(tmp, ".okulzili.surum")
+            with mock.patch.object(updater, "install_kind", return_value="linux"), \
+                    mock.patch.object(updater.sys, "executable", exe):
+                updater.note_installed_version()             # kur.sh ile kurulmamış: dosya açılmaz
+                self.assertFalse(os.path.exists(note))
+                with open(note, "w", encoding="utf-8") as f:
+                    f.write("1.4.0\n")
+                updater.note_installed_version()             # program kendini güncelledi
+            with open(note, encoding="utf-8") as f:
+                self.assertEqual(f.read(), __version__ + "\n")
+
 
 @unittest.skipUnless(sys.platform.startswith("linux"), "yalnızca Linux")
 class AutostartTests(unittest.TestCase):

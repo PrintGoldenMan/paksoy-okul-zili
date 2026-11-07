@@ -231,26 +231,59 @@ def _http_offset(url, timeout=5.0):
     return email.utils.parsedate_to_datetime(date).timestamp() - (t0 + t1) / 2
 
 
-def internet_clock_offset():
-    """İnternet saatiyle fark (saniye; + ise bilgisayar geride). İnternet yoksa None."""
+def _measurements():
+    """Bağımsız kaynaklardan sırayla ölçülen farklar (ulaşılamayan kaynak atlanır)."""
     for server in NTP_SERVERS:
         try:
-            return _sntp_offset(server)
+            yield _sntp_offset(server)
         except Exception:  # noqa: BLE001
             continue
     for url in HTTP_TIME_URLS:
         try:
-            return _http_offset(url)
+            yield _http_offset(url)
         except Exception:  # noqa: BLE001
             continue
+
+
+# Fark öncekinden (ilk ölçümde bilgisayar saatinden) bu kadar saniyeden çoksa tek kaynağa güvenilmez
+# (okul/otel ağının giriş sayfası ya da bozuk bir vekil sunucu yanlış «Date» verebilir): ikinci bir
+# kaynak CONFIRM_SECONDS içinde aynı farkı ölçmeli. Üst sınır yok: pili bitmiş bilgisayarın tarihi
+# yıllarca geri olabilir.
+SUSPICIOUS_SECONDS = 5 * 60
+CONFIRM_SECONDS = 30
+
+
+def choose_offset(measurements, previous=None):
+    """Ölçümlerden (sırayla, tembel üretilebilir) kullanılacak farkı seçer; doğrulanamazsa None."""
+    reference = previous or 0.0
+    seen = []
+    for value in measurements:
+        if abs(value - reference) <= SUSPICIOUS_SECONDS:
+            return value
+        for other in seen:
+            if abs(value - other) <= CONFIRM_SECONDS:
+                return other
+        seen.append(value)
     return None
+
+
+def internet_clock_offset(previous=None, measured=None):
+    """İnternet saatiyle fark (saniye; + ise bilgisayar geride). İnternet yoksa ya da büyük fark ikinci
+    bir kaynakla doğrulanamazsa None. measured listesine ölçülen bütün farklar eklenir."""
+    measured = [] if measured is None else measured
+
+    def record():
+        for value in _measurements():
+            measured.append(value)
+            yield value
+    return choose_offset(record(), previous)
 
 
 class ClockMonitor:
     """Bilgisayar saatini birkaç saatte bir internet saatiyle karşılaştırır (internet varsa)."""
 
     def __init__(self, interval_hours=3, first_delay=20, network_time=lambda: False):
-        self.offset = None          # en son ölçülen fark (saniye) ya da None
+        self.offset = None          # en son kabul edilen fark (saniye) ya da None
         self.checked_at = None
         self._interval = interval_hours * 3600
         self._network_time = network_time   # internet saati kullanılıyorsa 30 dakikada bir ölçülür
@@ -262,17 +295,22 @@ class ClockMonitor:
         self._wake.set()
 
     def _run(self):
+        from . import clock
         self._wake.wait(self._first_delay)
         while True:
             self._wake.clear()
-            offset = internet_clock_offset()
+            measured = []
+            offset = internet_clock_offset(clock.offset(), measured)
             if offset is not None:
-                from . import clock
                 self.offset = offset
                 self.checked_at = time.time()
                 clock.set_offset(offset)
                 if abs(offset) > 60:
                     log.warning("Bilgisayar saati internet saatinden %.0f saniye farklı", offset)
+            elif measured:
+                log.warning("İnternet saati doğrulanamadı (ölçülen fark: %s sn; ikinci bir kaynak "
+                            "doğrulamadı); önceki saat korunuyor",
+                            ", ".join(f"{v:.0f}" for v in measured))
             interval = 1800 if self._network_time() else self._interval
             self._wake.wait(min(interval, 900) if offset is None else interval)
 

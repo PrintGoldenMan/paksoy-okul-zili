@@ -44,6 +44,10 @@ class App:
         if autostart.supported():
             # Kurulum programı da otomatik başlatmayı açıp kapatabilir; kayıt defteri esas alınır.
             self.cfg["autostart"] = autostart.is_enabled()
+        # Saat kaynağı ilk iş ayarlanır: aşağıdaki tarih hesapları (değişen ses) da onu kullansın.
+        self.clock = system.ClockMonitor(network_time=lambda: self.cfg.get("use_network_time", False),
+                                         first_delay=3 if self.cfg.get("use_network_time") else 20)
+        clock.configure(self.cfg.get("use_network_time", False), on_jump=self.clock.check_now)
         if rotation.update_all(self.cfg):
             self._save_quietly()
         self._rotation_checked = None
@@ -54,9 +58,6 @@ class App:
         self.window = None
         self.tray = None
         self.volume = system.VolumeMonitor()
-        self.clock = system.ClockMonitor(network_time=lambda: self.cfg.get("use_network_time", False),
-                                         first_delay=3 if self.cfg.get("use_network_time") else 20)
-        clock.configure(self.cfg.get("use_network_time", False), on_jump=self.clock.check_now)
         self.updates = updater.UpdateChecker(lambda: self.cfg.get("check_updates", True))
         self.calendar = meb_takvim.CalendarUpdater()
         self._calendar_checked = None
@@ -422,6 +423,7 @@ def main():
         except OSError:
             pass
     updater.clear_updating_mark()
+    updater.note_installed_version()
     log.info("%s %s başlatıldı (veri klasörü: %s)", APP_NAME, __version__, paths.data_dir())
     if os.name == "nt":
         try:  # Görev çubuğunda Python simgesi yerine programın kendi kimliği görünsün.
