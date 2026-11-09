@@ -6,6 +6,7 @@ import json
 import logging
 import math
 import os
+import re
 
 from . import paths
 
@@ -81,6 +82,13 @@ DEFAULTS = {
         "morning_teacher_bell": True,   # ilk dersin öğretmen zili (08:30)
         "assembly_bell": False,         # toplanma zili (ilk dersten 10 dk önce, ör. 08:20); 08:28 zili çalmaz
         "assembly_minutes": DEFAULT_ASSEMBLY_MINUTES,
+        # Uzman / Profesyonel düzeyde: zilin adı, sabit saat ("" = ilk dersten dakika önce), günler
+        # (0 = Pazartesi), sabah öğrenci zili de çalsın mı, öğlenciler için de çalsın mı
+        "assembly_name": "Toplanma Zili",
+        "assembly_time": "",
+        "assembly_days": [0, 1, 2, 3, 4, 5, 6],
+        "assembly_keep_student": False,
+        "assembly_second_shift": False,
     },
     # "auto": süreler kullanılarak hesaplanır, "manual": ders saatleri tek tek girilir.
     "schedule_mode": "auto",
@@ -346,6 +354,16 @@ def _sanitize(cfg: dict) -> dict:
             second["timing"] = copy.deepcopy(DEFAULTS["second_shift"]["timing"])
     if not isinstance(cfg.get("short_day"), dict):
         cfg["short_day"] = copy.deepcopy(DEFAULTS["short_day"])
+    t = cfg.get("timing")
+    if isinstance(t, dict):
+        days = t.get("assembly_days")
+        t["assembly_days"] = sorted({d for d in days if isinstance(d, int) and 0 <= d <= 6}) \
+            if isinstance(days, list) else list(range(7))
+        at = t.get("assembly_time")
+        if not isinstance(at, str) or (at and not re.fullmatch(r"([01]?\d|2[0-3]):[0-5]\d", at.strip())):
+            t["assembly_time"] = ""
+        if not isinstance(t.get("assembly_name"), str):
+            t["assembly_name"] = DEFAULTS["timing"]["assembly_name"]
     lunch = cfg["short_day"].get("lunch_minutes")
     if lunch is not None:
         cfg["short_day"]["lunch_minutes"] = _number(lunch, None, 0, 180)

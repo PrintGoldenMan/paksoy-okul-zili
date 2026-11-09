@@ -379,6 +379,7 @@ class MainWindow(ctk.CTk):
         cfg = self.app.cfg
         ctk.set_appearance_mode({"light": "light", "dark": "dark"}.get(cfg["theme"], "system"))
         dot, name = self._assembly_legend
+        name.configure(text=schedule.assembly_name(cfg))
         if cfg["timing"].get("assembly_bell"):
             if not dot.winfo_ismapped():
                 dot.pack(side="left", before=name.master.winfo_children()[2])

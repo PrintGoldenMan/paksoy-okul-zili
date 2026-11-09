@@ -67,3 +67,47 @@ class AssemblyBellTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AssemblyAdvancedTests(unittest.TestCase):
+    """Uzman / Profesyonel ayarları: ad, sabit saat, günler, öğrenci zili, öğlenciler."""
+
+    def setUp(self):
+        self.cfg = config.default_config()
+        self.cfg["timing"]["assembly_bell"] = True
+
+    def test_fixed_time_and_name(self):
+        self.cfg["timing"].update(assembly_time="08:15", assembly_name="Bayrak Töreni Zili")
+        first = schedule.events_for_date(self.cfg, MONDAY)[0]
+        self.assertEqual((first.time_str, first.kind, first.label), ("08:15", "toplanma", "Bayrak Töreni Zili"))
+        self.assertEqual(first.bell_id, "toplanma-1")   # ad değişse de kalıcı kimlik aynı
+
+    def test_fixed_time_after_first_lesson_falls_back(self):
+        self.cfg["timing"]["assembly_time"] = "08:45"   # ilk dersten sonra: dakika ayarı kullanılır
+        self.assertEqual(morning(self.cfg)[0], ("08:20", "toplanma"))
+
+    def test_days(self):
+        self.cfg["timing"]["assembly_days"] = [0]        # yalnızca pazartesi
+        self.assertEqual(morning(self.cfg)[0], ("08:20", "toplanma"))
+        tuesday = [(e.time_str, e.kind) for e in schedule.events_for_date(self.cfg, MONDAY + dt.timedelta(days=1))
+                   if e.minute < 9 * 60]
+        self.assertEqual(tuesday, [("08:28", "ogrenci"), ("08:30", "ogretmen")])
+
+    def test_keep_student_bell(self):
+        self.cfg["timing"]["assembly_keep_student"] = True
+        self.assertEqual(morning(self.cfg), [("08:20", "toplanma"), ("08:28", "ogrenci"), ("08:30", "ogretmen")])
+
+    def test_second_shift(self):
+        self.cfg["timing"].update(first_lesson="07:40", lesson_count=6, lunch_after=0, lunch_minutes=0,
+                                  assembly_second_shift=True, assembly_time="07:25")
+        self.cfg["second_shift"]["enabled"] = True
+        bells = [(e.shift, e.time_str) for e in schedule.events_for_date(self.cfg, MONDAY) if e.kind == "toplanma"]
+        # Sabit saat yalnızca sabahçılar için; öğlencilerde ilk dersten 10 dk önce
+        self.assertEqual(bells, [(1, "07:25"), (2, "12:50")])
+
+    def test_broken_values_are_sanitized(self):
+        cfg = config._sanitize(config._merge(config.DEFAULTS, {"timing": {
+            "assembly_days": [0, 9, "x"], "assembly_time": "25:99", "assembly_name": 5}}))
+        self.assertEqual(cfg["timing"]["assembly_days"], [0])
+        self.assertEqual(cfg["timing"]["assembly_time"], "")
+        self.assertEqual(cfg["timing"]["assembly_name"], "Toplanma Zili")

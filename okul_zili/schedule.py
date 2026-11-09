@@ -237,11 +237,38 @@ def assembly_minutes(cfg) -> int:
         return DEFAULT_ASSEMBLY_MINUTES
 
 
-def events_for_lessons(cfg: dict, lessons: list, shift=1, shift_name="", timing=None) -> list:
+def assembly_minute(cfg, first_start, shift=1, weekday=None):
+    """Bu vardiyanın bu gün toplanma zilinin dakikası; çalmayacaksa None.
+    Sabit saat yalnızca sabahçılar / tek grup içindir ve ilk dersten önce olmalıdır (değilse dakika ayarı)."""
+    before = assembly_minutes(cfg)
+    t = cfg["timing"]
+    if not before or (shift == 2 and not t.get("assembly_second_shift")):
+        return None
+    days = t.get("assembly_days")
+    if weekday is not None and isinstance(days, list) and weekday not in days:
+        return None
+    fixed = t.get("assembly_time") if shift == 1 else ""
+    if fixed:
+        try:
+            minute = parse_hm(fixed)
+            if minute < first_start:
+                return minute
+        except (TypeError, ValueError):
+            pass
+    return first_start - before
+
+
+def assembly_name(cfg) -> str:
+    name = cfg["timing"].get("assembly_name")
+    return name.strip() if isinstance(name, str) and name.strip() else BELL_NAMES["toplanma"]
+
+
+def events_for_lessons(cfg: dict, lessons: list, shift=1, shift_name="", timing=None, weekday=None) -> list:
     timing = timing or cfg["timing"]
     offset = int(cfg["timing"].get("student_offset", 2))
-    # Toplanma zili (yalnızca sabahçılar / tek grup): ilk dersten önce çalar, o sabahki öğrenci zili çalmaz.
-    assembly = assembly_minutes(cfg) if shift == 1 else 0
+    # Toplanma zili: ilk dersten önce çalar; ayarda istenmedikçe o sabahki öğrenci zili çalmaz.
+    assembly = assembly_minute(cfg, lessons[0][0], shift, weekday) if lessons else None
+    keep_student = bool(cfg["timing"].get("assembly_keep_student"))
     prefix = f"{shift_name} · " if shift_name else ""
     # Süreler ile hesaplanan programda öğle arası ayardan bilinir; elle girilen saatlerde
     # 30 dakika ve üzeri boşluk öğle arası sayılır.
@@ -254,9 +281,11 @@ def events_for_lessons(cfg: dict, lessons: list, shift=1, shift_name="", timing=
     events = []
     for i, (start, end) in enumerate(lessons, start=1):
         prev_end = lessons[i - 2][1] if i > 1 else None
-        if prev_end is None and assembly:
-            events.append(_bell(cfg, start - assembly, "toplanma", i, "", prefix + "Öğrenciler toplanır", shift))
-        elif offset > 0:
+        if prev_end is None and assembly is not None:
+            e = _bell(cfg, assembly, "toplanma", i, "", prefix + "Öğrenciler toplanır", shift)
+            e.label = assembly_name(cfg)
+            events.append(e)
+        if offset > 0 and (prev_end is not None or assembly is None or keep_student):
             student = start - offset
             if prev_end is None:
                 e = _bell(cfg, student, "ogrenci", i, "", prefix + "Öğrenciler sınıfa girer", shift)
@@ -286,7 +315,7 @@ def events_for_weekday(cfg: dict, weekday: int) -> list:
     """Bir haftanın gününün bütün zilleri (tarihe bağlı tatil/kapatma uygulanmadan), sıralı."""
     events = []
     for shift, name, lessons, timing in shifts_for_weekday(cfg, weekday):
-        events += events_for_lessons(cfg, lessons, shift=shift, shift_name=name, timing=timing)
+        events += events_for_lessons(cfg, lessons, shift=shift, shift_name=name, timing=timing, weekday=weekday)
     events += extra_events(cfg, weekday)
     events.sort(key=lambda e: (e.minute, {"cikis": 0, "ek": 1, "toplanma": 2, "ogrenci": 2, "ogretmen": 3}[e.kind]))
     return events

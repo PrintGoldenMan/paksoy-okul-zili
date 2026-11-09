@@ -515,19 +515,37 @@ class SettingsWindow(ctk.CTkToplevel):
         self._hint(b, "Toplanma zili açıkken sabah ilk dersten önce yalnızca toplanma zili çalar; öğrenciler "
                       "toplandığı için o sabahki öğrenci zili çalmaz. Öğretmen zili ders başında çalar.", row=3)
 
+        adv = self._assembly_advanced(b, t, first) if self._at_least("uzman") else None
+
         def refresh(*_):
             try:
                 m = minutes.get()
             except ValueError:
                 m = DEFAULT_ASSEMBLY_MINUTES
-            assembly_sw.configure(text=f"{fmt_hm(first - m)}  Toplanma zili (öğrenciler toplanır)")
-            on = bool(assembly.get())
+            at = first - m
+            name = "Toplanma zili"
+            keep = False
+            if adv:
+                name = adv["name"].get().strip() or name
+                keep = bool(adv["keep"].get())
+                try:
+                    fixed = parse_hm(adv["time"].get().strip()) if adv["time"].get().strip() else None
+                except ValueError:
+                    fixed = None
+                if fixed is not None and fixed < first:
+                    at = fixed
+            assembly_sw.configure(text=f"{fmt_hm(at)}  {name} (öğrenciler toplanır)")
+            off = bool(assembly.get()) and not keep
             student_sw.configure(
-                state="disabled" if on else "normal",
+                state="disabled" if off else "normal",
                 text=f"{fmt_hm(first - int(t['student_offset']))}  Öğrenci zili (sabah öğrenciler sınıfa girer)"
-                     + ("  – toplanma zili açıkken çalmaz" if on else ""))
+                     + ("  – toplanma zili açıkken çalmaz" if off else ""))
         assembly_sw.configure(command=refresh)
         minutes.var.trace_add("write", refresh)
+        if adv:
+            for key in ("name", "time"):
+                adv[key].bind("<KeyRelease>", refresh)
+            adv["keep_box"].configure(command=refresh)
         refresh()
 
         def collect():
@@ -538,7 +556,56 @@ class SettingsWindow(ctk.CTkToplevel):
                 t["assembly_minutes"] = minutes.get()
             except ValueError as exc:
                 raise ValueError(f"Toplanma zili: {exc}")
+            if adv:
+                adv["collect"]()
         self._collectors.append(collect)
+
+    def _assembly_advanced(self, b, t, first):
+        """Uzman / Profesyonel: toplanma zilinin adı, sabit saati, günleri ve diğer seçenekleri."""
+        outer = ctk.CTkFrame(b, fg_color=theme.ROW_ALT, corner_radius=10)
+        outer.grid(row=4, column=0, columnspan=4, sticky="ew", pady=(10, 0))
+        box = ctk.CTkFrame(outer, fg_color="transparent")
+        box.pack(fill="x", padx=12, pady=(0, 4))
+        ctk.CTkLabel(box, text="Gelişmiş toplanma ayarları", font=theme.font(13, "bold")).grid(
+            row=0, column=0, columnspan=4, sticky="w", pady=(10, 4))
+        name = ctk.CTkEntry(box, width=240, placeholder_text="Toplanma Zili")
+        if t.get("assembly_name") and t.get("assembly_name") != "Toplanma Zili":
+            name.insert(0, t["assembly_name"])
+        labeled_row(box, 1, "Zilin adı", name, "ör. Bayrak Töreni Zili")
+        fixed = time_entry(box, t.get("assembly_time", ""))
+        labeled_row(box, 2, "Sabit saat", fixed, f"boş = ilk dersten dakika önce · {fmt_hm(first)}'dan önce olmalı")
+        days_row = ctk.CTkFrame(box, fg_color="transparent")
+        chosen = set(t.get("assembly_days") or range(7))
+        day_vars = []
+        for i, d in enumerate(("Pzt", "Sal", "Çar", "Per", "Cum", "Cmt", "Paz")):
+            v = ctk.BooleanVar(value=i in chosen)
+            ctk.CTkCheckBox(days_row, text=d, variable=v, width=64).pack(side="left")
+            day_vars.append(v)
+        labeled_row(box, 3, "Günler", days_row)
+        keep = ctk.BooleanVar(value=bool(t.get("assembly_keep_student")))
+        keep_box = ctk.CTkCheckBox(box, text="Sabah öğrenci zili (ör. 08:28) de çalsın", variable=keep)
+        keep_box.grid(row=4, column=0, columnspan=4, sticky="w", pady=4)
+        second = ctk.BooleanVar(value=bool(t.get("assembly_second_shift")))
+        ctk.CTkCheckBox(box, text="İkili öğretimde öğlenciler için de çalsın (ilk derslerinden aynı dakika önce)",
+                        variable=second).grid(row=5, column=0, columnspan=4, sticky="w", pady=(4, 8))
+
+        def collect():
+            text = fixed.get().strip()
+            if text:
+                try:
+                    minute = parse_hm(text)
+                except ValueError:
+                    raise ValueError("Toplanma zili: sabit saat SS:DD biçiminde olmalı (ör. 08:15).")
+                if minute >= first:
+                    raise ValueError(f"Toplanma zili: sabit saat ({fmt_hm(minute)}) ilk dersten "
+                                     f"({fmt_hm(first)}) önce olmalı.")
+                text = fmt_hm(minute)
+            days = [i for i, v in enumerate(day_vars) if v.get()]
+            if not days:
+                raise ValueError("Toplanma zili: en az bir gün seçin (hiç çalmasın istiyorsanız kapatın).")
+            t.update(assembly_name=name.get().strip() or "Toplanma Zili", assembly_time=text, assembly_days=days,
+                     assembly_keep_student=bool(keep.get()), assembly_second_shift=bool(second.get()))
+        return {"name": name, "time": fixed, "keep": keep, "keep_box": keep_box, "collect": collect}
 
     # -- sekmeler -----------------------------------------------------------
 

@@ -78,7 +78,9 @@ Linux: `OkulZili-Linux-x86_64-….tar.gz` ·
 - **Toplanma zili (isteğe bağlı, varsayılan kapalı):** Açılırsa her okul günü ilk dersten 10 dakika önce (08:30'da
   başlayan okulda 08:20) «Toplanma Zili» çalar; öğrenciler toplandığı için o sabahki 08:28 öğrenci zili çalmaz,
   08:30 öğretmen zili ders başında çalar. Dakika ayarlanabilir; sesi ve anons metni ayrıdır (Ayarlar → Sabah Zilleri).
-  İkili öğretimde yalnızca sabahçılar için geçerlidir.
+  **Uzman ve Profesyonel** düzeyde ayrıca: zilin adı (ör. «Bayrak Töreni Zili»), sabit saat (ör. 08:15), hangi
+  günler çalacağı (ör. yalnızca pazartesi ve cuma), sabah öğrenci zilinin de çalması ve ikili öğretimde öğlenciler
+  için de çalması seçilebilir.
 - **Zilleri tek tek kapatma:** Ana ekrandaki «Kapat» düğmesiyle herhangi bir zil yalnızca bugün için
   susturulur (Gelişmiş ve üstü). Profesyonel düzeyde ziller kalıcı olarak, her gün ya da belirli bir gün için kapatılabilir.
 - Elle zil çalma (onay sorulur), anlık anons, «Sustur» düğmesi, «yalnızca bugün zilleri kapat» anahtarı.
