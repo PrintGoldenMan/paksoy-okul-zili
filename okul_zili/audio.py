@@ -352,8 +352,10 @@ class Player:
                 pygame.mixer.music.set_volume(base * left / fade_s)
             segment_over = not pygame.mixer.music.get_busy() or (part_len and now - seg_t0 >= part_len)
             if segment_over:
-                if duration and left > 0.05:
-                    seg_t0 = begin()   # bölüm bitti ama zil süresi dolmadı: bölümün başından tekrar
+                if duration and left > 0.6:
+                    # Bölüm bitti ama zil süresi dolmadı: bölümün başından tekrar. Kalan süre çok kısaysa
+                    # (ör. 10 sn'lik zil, 9,5 sn'lik ses) baştan birkaç nota çalıp kesilmesin diye durulur.
+                    seg_t0 = begin()
                     if fade_s and left <= fade_s:
                         pygame.mixer.music.set_volume(base * left / fade_s)
                 else:

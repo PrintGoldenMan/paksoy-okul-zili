@@ -33,7 +33,7 @@ LEVEL_DESCRIPTIONS = {
 DEFAULT_RING_SECONDS = 3.5
 # Programla gelen zil sesi (Für Elise'in açılış cümlesi): zil bu kadar çalar ve cümle bitince susar.
 DEFAULT_BELL_SOUND = "gomulu:zil"
-DEFAULT_BELL_SECONDS = 10.0
+DEFAULT_BELL_SECONDS = 9.5
 MIN_RING_SECONDS = 1.5
 MAX_RING_SECONDS = 30.0
 

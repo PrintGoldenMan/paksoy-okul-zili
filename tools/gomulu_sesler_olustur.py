@@ -26,7 +26,9 @@ NAMES = {"istiklal": "İstiklal Marşı", "saygi": "Saygı Duruşu + İstiklal M
 # Yalnızca baştaki bölüm saklanacak sesler (saniye) ve zilin kendiliğinden durduğu yer («bitis», saniye):
 # Für Elise'in açılış cümlesi uzun tutulan La notasıyla biter; zil orada yumuşakça susar.
 EN_FAZLA = {"zil": 15.0}
-BITIS = {"zil": 10.0}
+# Bitiş, kaynak kaydın zaman çizelgesindedir (açılış cümlesinin La notası 10,54 sn'de söner; 10,7 sn'de
+# yeni cümle başlar). Baştan kırpılan kısım düşülerek gömülü sesteki «bitis» hesaplanır.
+BITIS_KAYNAKTA = {"zil": 10.54}
 CHUNK = 4000
 EXTS = (".opus", ".ogg", ".webm", ".m4a", ".mp3", ".wav", ".flac", ".aac")
 
@@ -50,15 +52,38 @@ EDGE_TRIM = ("silenceremove=start_periods=1:start_threshold=-50dB:start_silence=
              "silenceremove=start_periods=1:start_threshold=-50dB:start_silence=0.5,areverse")
 
 
-def to_opus(src, out, limit=None):
+def first_note(src, threshold_db=-42.0, hold=0.06, window=0.02):
+    """İlk notanın başladığı saniye: ses düzeyinin «hold» süre boyunca eşiği aştığı ilk yer. Kayıttaki taban
+    gürültüsü (hışırtı, ~-50 dBFS) ve kısa tıklamalar sayılmaz."""
+    import array
+    import math
+    rate = 16000
+    raw = subprocess.run([ffmpeg(), "-hide_banner", "-loglevel", "error", "-t", "10", "-i", str(src), "-ac", "1",
+                          "-ar", str(rate), "-f", "s16le", "-"], capture_output=True, check=True).stdout
+    pcm = array.array("h")
+    pcm.frombytes(raw[:len(raw) // 2 * 2])
+    n = int(rate * window)
+    levels = []
+    for i in range(0, len(pcm) - n, n):
+        rms = math.sqrt(sum(x * x for x in pcm[i:i + n]) / n) or 1e-9
+        levels.append(20 * math.log10(rms / 32768))
+    need = max(1, round(hold / window))
+    for i in range(len(levels) - need):
+        if all(v > threshold_db for v in levels[i:i + need]):
+            return max(0.0, (i - 1) * window)   # notanın hemen önünden (20 ms pay)
+    return 0.0
+
+
+def to_opus(src, out, limit=None, start=0.0):
     if limit:
-        # Baştaki sessizlik kırpılır, ilk «limit» saniye alınır, sonu yumuşakça kısılır.
-        af = (f"silenceremove=start_periods=1:start_threshold=-50dB:start_silence=0.05,"
-              f"atrim=0:{limit},afade=t=out:st={limit - 0.5}:d=0.5")
+        # İlk notadan başlanır (baştaki sessizlik ve hışırtı atılır); kesim yeri tıklamasın diye 15 ms'lik
+        # açılış; ilk «limit» saniye alınır, sonu yumuşakça kısılır.
+        seek = ["-ss", f"{start:.3f}"]
+        af = f"afade=t=in:d=0.015,atrim=0:{limit},afade=t=out:st={limit - 0.5}:d=0.5"
     else:
-        af = EDGE_TRIM
-    subprocess.run([ffmpeg(), "-hide_banner", "-loglevel", "error", "-y", "-i", str(src), "-vn", "-sn", "-dn",
-                    "-map_metadata", "-1", "-af", af, "-ar", "48000", "-ac", "2", "-c:a", "libopus",
+        seek, af = [], EDGE_TRIM
+    subprocess.run([ffmpeg(), "-hide_banner", "-loglevel", "error", "-y", *seek, "-i", str(src), "-vn", "-sn",
+                    "-dn", "-map_metadata", "-1", "-af", af, "-ar", "48000", "-ac", "2", "-c:a", "libopus",
                     "-b:a", "160k", "-f", "opus", str(out)], check=True)
 
 
@@ -100,7 +125,9 @@ def main():
             print(f"{key}: kaynak yok, mevcut ses korundu")
         else:
             path = tmp / f"{key}.opus"
-            to_opus(find_source(key), path, EN_FAZLA.get(key))
+            src = find_source(key)
+            start = first_note(src) if key in EN_FAZLA else 0.0
+            to_opus(src, path, EN_FAZLA.get(key), start)
             data = path.read_bytes()
             meta_file = SRC / f"{key}.json"
             meta = json.loads(meta_file.read_text(encoding="utf-8")) if meta_file.exists() else {}
@@ -108,8 +135,9 @@ def main():
             fields = {"ad": name, "sure": duration(path), "kaynak": meta.get("webpage_url", ""),
                       "baslik": meta.get("title", ""), "boyut": len(data),
                       "sha256": hashlib.sha256(data).hexdigest()}
-            if key in BITIS:
-                fields["bitis"] = BITIS[key]
+            if key in BITIS_KAYNAKTA:
+                fields["bitis"] = round(BITIS_KAYNAKTA[key] - start, 2)
+                print(f"{key}: ilk nota {start:.2f} sn'de; baştan kırpıldı, zil {fields['bitis']} sn çalar")
             print(f"{key}: {len(data) / 1024:.0f} KB, {fields['sure']} sn")
         lines.append(f"    {key!r}: {{")
         for field, value in fields.items():
