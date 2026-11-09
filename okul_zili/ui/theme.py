@@ -28,12 +28,14 @@ BELL_COLORS = {
     "ogretmen": ("#d9822b", "#e0913f"),
     "cikis": ("#7b4bc4", "#9166d6"),
     "ek": ("#2b8fb5", "#3aa3cc"),
+    "toplanma": ("#b8860b", "#c9971a"),
 }
 BELL_HOVER = {
     "ogrenci": ("#247d49", "#268f53"),
     "ogretmen": ("#b86d22", "#c47c32"),
     "cikis": ("#633ba1", "#7752b8"),
     "ek": ("#22738f", "#2f86a6"),
+    "toplanma": ("#946c08", "#a67d12"),
 }
 
 

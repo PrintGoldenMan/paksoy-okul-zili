@@ -49,7 +49,10 @@ def ring_seconds(value) -> float:
 
 BELL_TYPES = ["ogrenci", "ogretmen", "cikis"]
 BELL_NAMES = {"ogrenci": "Öğrenci Zili", "ogretmen": "Öğretmen Zili",
-              "cikis": "Çıkış Zili", "ek": "Ek Zil"}
+              "cikis": "Çıkış Zili", "ek": "Ek Zil", "toplanma": "Toplanma Zili"}
+# Sabah toplanma zili: açıksa ilk dersten «assembly_minutes» dakika önce çalar ve o günün ilk öğrenci zili
+# (ör. 08:28) çalmaz; öğretmen zili (08:30) olduğu gibi kalır. Yalnızca sabahçılar / tek grup için.
+DEFAULT_ASSEMBLY_MINUTES = 10
 
 def _rotation_default():
     """Değişen zil sesi (rotation.py): kapalıyken zil «sound» ayarındaki sesi çalar."""
@@ -76,6 +79,8 @@ DEFAULTS = {
         "student_offset": 2,
         "morning_student_bell": True,   # ilk dersten önceki öğrenci zili (08:28)
         "morning_teacher_bell": True,   # ilk dersin öğretmen zili (08:30)
+        "assembly_bell": False,         # toplanma zili (ilk dersten 10 dk önce, ör. 08:20); 08:28 zili çalmaz
+        "assembly_minutes": DEFAULT_ASSEMBLY_MINUTES,
     },
     # "auto": süreler kullanılarak hesaplanır, "manual": ders saatleri tek tek girilir.
     "schedule_mode": "auto",
@@ -104,6 +109,11 @@ DEFAULTS = {
             "text": "{ders_sira} ders sona ermiştir. İyi teneffüsler.",
             "text_lunch": "Öğle arası başlamıştır. Afiyet olsun.",
             "text_last": "Bugünkü dersler sona ermiştir. İyi günler dileriz.",
+        },
+        "toplanma": {
+            "sound": DEFAULT_BELL_SOUND, "duration": DEFAULT_BELL_SECONDS, "volume": 100, "tts": True,
+            "rotation": _rotation_default(),
+            "text": "Sevgili öğrenciler, toplanma zili çaldı. Lütfen toplanma alanına geçiniz.",
         },
     },
     "tts": {

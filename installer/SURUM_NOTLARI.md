@@ -40,6 +40,9 @@ gerekmez; eski sürüm varsa ayarlar korunarak güncellenir). Program uygulama m
 - **Hazır zil sesi:** Program artık kendi zil sesiyle gelir: Beethoven'ın Für Elise'inin açılış cümlesi (programa
   yalnızca ilk 15 saniyesi gömülüdür). Zil yaklaşık 10 saniye çalar ve müzik cümlesi bittiği yerde yumuşakça susar.
   Sesi hiç seçilmemiş zillere kendiliğinden verilir; kendi seçtiğiniz seslere dokunulmaz.
+- **Toplanma zili** (Ayarlar → Ders Saatleri → Sabah Zilleri, varsayılan kapalı): açılırsa her okul günü ilk
+  dersten 10 dakika önce (ör. 08:20) «Toplanma Zili» çalar; o sabahki 08:28 öğrenci zili çalmaz, 08:30 öğretmen zili
+  ders başında çalar. Dakika, ses ve anons metni ayarlanabilir.
 - **Tepside başlama:** Bilgisayar açılınca (ya da program kendiliğinden yeniden açılınca) pencere açılmadan, saatin
   yanındaki simge olarak başlar (Ayarlar → Genel'den kapatılabilir).
 - **Linux'ta tepsi simgesi:** Lubuntu/LXQt, KDE, XFCE ve diğerlerinde saatin yanında simge görünür (sustur, göster,

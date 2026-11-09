@@ -22,7 +22,7 @@ import customtkinter as ctk
 from tkinter import filedialog, messagebox
 
 from .. import ISSUES_URL, __version__, autostart, backup, ceremony, clock, config, library, meb_takvim, paths, rotation, schedule, sounds, system, tts
-from ..config import (BELL_NAMES, BELL_TYPES, DEFAULT_BELL_SECONDS, DEFAULT_RING_SECONDS, LEVEL_DESCRIPTIONS, LEVEL_NAMES, LEVELS,
+from ..config import (BELL_NAMES, BELL_TYPES, DEFAULT_ASSEMBLY_MINUTES, DEFAULT_BELL_SECONDS, DEFAULT_RING_SECONDS, LEVEL_DESCRIPTIONS, LEVEL_NAMES, LEVELS,
                       MAX_RING_SECONDS, MIN_RING_SECONDS, ring_seconds)
 from ..schedule import fmt_hm, parse_hm
 from ..turkish import DAYS, capitalize_first, ordinal_word
@@ -499,19 +499,45 @@ class SettingsWindow(ctk.CTkToplevel):
         t = self.cfg["timing"]
         lessons = schedule.lessons_for_weekday(self.cfg, 0) or [(parse_hm(t["first_lesson"]), 0)]
         first = lessons[0][0]
-        b = self._card(f, "Sabah Zilleri", "İlk dersten önce çalan zilleri buradan kapatabilirsiniz. "
+        b = self._card(f, "Sabah Zilleri", "İlk dersten önce çalan zilleri buradan açıp kapatabilirsiniz. "
                                            "Kapalı olan zil hiçbir gün çalmaz.")
         student = ctk.BooleanVar(value=t.get("morning_student_bell", True))
         teacher = ctk.BooleanVar(value=t.get("morning_teacher_bell", True))
-        ctk.CTkSwitch(b, text=f"{fmt_hm(first - int(t['student_offset']))}  Öğrenci zili "
-                              "(sabah öğrenciler sınıfa girer)",
-                      variable=student, font=theme.font(14)).grid(row=0, column=0, columnspan=3, sticky="w", pady=4)
+        assembly = ctk.BooleanVar(value=bool(t.get("assembly_bell", False)))
+        assembly_sw = ctk.CTkSwitch(b, text="", variable=assembly, font=theme.font(14))
+        assembly_sw.grid(row=0, column=0, columnspan=2, sticky="w", pady=4)
+        minutes = Spin(b, t.get("assembly_minutes", DEFAULT_ASSEMBLY_MINUTES), 3, 60, suffix="dk önce")
+        minutes.grid(row=0, column=2, sticky="w", padx=(10, 0))
+        student_sw = ctk.CTkSwitch(b, text="", variable=student, font=theme.font(14))
+        student_sw.grid(row=1, column=0, columnspan=3, sticky="w", pady=4)
         ctk.CTkSwitch(b, text=f"{fmt_hm(first)}  Öğretmen zili (1. ders başlar)",
-                      variable=teacher, font=theme.font(14)).grid(row=1, column=0, columnspan=3, sticky="w", pady=4)
+                      variable=teacher, font=theme.font(14)).grid(row=2, column=0, columnspan=3, sticky="w", pady=4)
+        self._hint(b, "Toplanma zili açıkken sabah ilk dersten önce yalnızca toplanma zili çalar; öğrenciler "
+                      "toplandığı için o sabahki öğrenci zili çalmaz. Öğretmen zili ders başında çalar.", row=3)
+
+        def refresh(*_):
+            try:
+                m = minutes.get()
+            except ValueError:
+                m = DEFAULT_ASSEMBLY_MINUTES
+            assembly_sw.configure(text=f"{fmt_hm(first - m)}  Toplanma zili (öğrenciler toplanır)")
+            on = bool(assembly.get())
+            student_sw.configure(
+                state="disabled" if on else "normal",
+                text=f"{fmt_hm(first - int(t['student_offset']))}  Öğrenci zili (sabah öğrenciler sınıfa girer)"
+                     + ("  – toplanma zili açıkken çalmaz" if on else ""))
+        assembly_sw.configure(command=refresh)
+        minutes.var.trace_add("write", refresh)
+        refresh()
 
         def collect():
             t["morning_student_bell"] = bool(student.get())
             t["morning_teacher_bell"] = bool(teacher.get())
+            t["assembly_bell"] = bool(assembly.get())
+            try:
+                t["assembly_minutes"] = minutes.get()
+            except ValueError as exc:
+                raise ValueError(f"Toplanma zili: {exc}")
         self._collectors.append(collect)
 
     # -- sekmeler -----------------------------------------------------------
@@ -978,11 +1004,12 @@ class SettingsWindow(ctk.CTkToplevel):
                       command=self.app.player.stop_preview).grid(row=0, column=3, padx=8)
 
         pickers = {}
-        for kind in BELL_TYPES:
+        for kind in BELL_TYPES + (["toplanma"] if cfg["timing"].get("assembly_bell") else []):
             bell = cfg["bells"][kind]
             sub = {"ogrenci": "Teneffüs bitmeden önce çalar; öğrenciler sınıfa girer.",
                    "ogretmen": "Ders başladığında çalar; öğretmenler sınıfa girer.",
-                   "cikis": "Ders bittiğinde çalar."}[kind]
+                   "cikis": "Ders bittiğinde çalar.",
+                   "toplanma": "Sabah ilk dersten önce çalar; öğrenciler toplanır (Ders Saatleri → Sabah Zilleri)."}[kind]
             b = self._card(f, BELL_NAMES[kind], sub)
             ctk.CTkFrame(b, width=6, height=30, corner_radius=3, fg_color=theme.BELL_COLORS[kind]).grid(
                 row=0, column=0, rowspan=3, sticky="ns", padx=(0, 10))
@@ -1319,6 +1346,8 @@ class SettingsWindow(ctk.CTkToplevel):
         fields = [("ogrenci", "text", "Öğrenci zili"), ("ogretmen", "text", "Öğretmen zili"),
                   ("cikis", "text", "Çıkış zili (teneffüs)"), ("cikis", "text_lunch", "Çıkış zili (öğle arası)"),
                   ("cikis", "text_last", "Çıkış zili (son ders)")]
+        if cfg["timing"].get("assembly_bell"):
+            fields.append(("toplanma", "text", "Toplanma zili"))
         tts_flags = {}
         for kind, key, label in fields:
             if kind not in tts_flags:

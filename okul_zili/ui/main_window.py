@@ -344,9 +344,13 @@ class MainWindow(ctk.CTk):
         self.day_info.grid(row=0, column=0, columnspan=2, sticky="ew")
         legend = ctk.CTkFrame(card.body, fg_color="transparent")
         legend.grid(row=1, column=0, columnspan=2, sticky="w", pady=(2, 6))
-        for kind in ("ogrenci", "ogretmen", "cikis", "ek"):
-            ctk.CTkLabel(legend, text="●", text_color=theme.BELL_COLORS[kind]).pack(side="left")
-            ctk.CTkLabel(legend, text=BELL_NAMES[kind], font=theme.font(12)).pack(side="left", padx=(2, 10))
+        for kind in ("toplanma", "ogrenci", "ogretmen", "cikis", "ek"):
+            dot = ctk.CTkLabel(legend, text="●", text_color=theme.BELL_COLORS[kind])
+            dot.pack(side="left")
+            name = ctk.CTkLabel(legend, text=BELL_NAMES[kind], font=theme.font(12))
+            name.pack(side="left", padx=(2, 10))
+            if kind == "toplanma":
+                self._assembly_legend = (dot, name)   # yalnızca toplanma zili açıkken gösterilir
         self.list_frame = ctk.CTkScrollableFrame(card.body, fg_color="transparent")
         self.list_frame.grid(row=2, column=0, columnspan=2, sticky="nsew")
         self.list_frame.grid_columnconfigure(2, weight=1)
@@ -374,6 +378,14 @@ class MainWindow(ctk.CTk):
     def refresh_all(self):
         cfg = self.app.cfg
         ctk.set_appearance_mode({"light": "light", "dark": "dark"}.get(cfg["theme"], "system"))
+        dot, name = self._assembly_legend
+        if cfg["timing"].get("assembly_bell"):
+            if not dot.winfo_ismapped():
+                dot.pack(side="left", before=name.master.winfo_children()[2])
+                name.pack(side="left", padx=(2, 10), after=dot)
+        else:
+            dot.pack_forget()
+            name.pack_forget()
         self.title(f"{APP_NAME} – {cfg['school_name']}" if cfg.get("school_name") else APP_NAME)
         name = cfg.get("school_name") or APP_NAME
         self.school_lbl.configure(text=name if len(name) <= 60 else name[:58] + "…")
