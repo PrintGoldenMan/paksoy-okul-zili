@@ -21,6 +21,11 @@ def _display_available():
         return False
 
 
+def config_default(kind, key):
+    from okul_zili import config
+    return config.DEFAULTS["bells"][kind][key]
+
+
 @unittest.skipUnless(_display_available(), "ekran yok")
 class UISmokeTests(unittest.TestCase):
     @classmethod
@@ -134,6 +139,101 @@ class UISmokeTests(unittest.TestCase):
             d = make()
             d.update()
             d.destroy()
+
+    def _find(self, widget, cls):
+        found = [widget] if isinstance(widget, cls) else []
+        for child in widget.winfo_children():
+            found += self._find(child, cls)
+        return found
+
+    def test_assembly_fields_follow_switch(self):
+        # Toplanma zili, Zil Sesleri ve Sesli Anons sekmeleri çizildikten sonra açılınca kartı/metni görünür,
+        # kapatılınca gizlenir; kaydedince ses ve metin korunur.
+        import customtkinter as ctk
+        from okul_zili.ui.settings_window import SettingsWindow
+        self.app.cfg["level"] = "uzman"
+        self.app.cfg["timing"]["assembly_bell"] = False
+        s = SettingsWindow(self.win, self.app)
+        try:
+            for tab in ("Zil Sesleri", "Sesli Anons", "Ders Saatleri"):
+                s._ensure_built(tab)
+            s.update()
+
+            def shown():
+                return [bool(w.grid_info()) for w in s._assembly_widgets]
+            cards = [c for c in self._find(s.tabs.tab("Zil Sesleri"), ctk.CTkLabel)
+                     if c.cget("text") == "Toplanma Zili"]
+            self.assertEqual(len(cards), 1)
+            self.assertTrue(s._assembly_widgets)
+            self.assertFalse(any(shown()))
+            switch = next(w for w in self._find(s.tabs.tab("Ders Saatleri"), ctk.CTkSwitch)
+                          if "toplanır" in w.cget("text"))
+            switch.toggle()
+            s.update()
+            self.assertTrue(all(shown()))
+            switch.toggle()
+            self.assertFalse(any(shown()))
+            switch.toggle()
+            s._save()
+        finally:
+            if s.winfo_exists():
+                s._cancel_without_prompt()
+        cfg = self.app.cfg
+        self.assertTrue(cfg["timing"]["assembly_bell"])
+        self.assertEqual(cfg["bells"]["toplanma"]["sound"], config_default("toplanma", "sound"))
+        self.assertEqual(cfg["bells"]["toplanma"]["text"], config_default("toplanma", "text"))
+        self.app.update_config(level="basit", timing=dict(cfg["timing"], assembly_bell=False))
+
+    def test_morning_card_follows_first_lesson(self):
+        # İlk ders 08:30 → 09:00 yapılıp sabit toplanma saati 08:45 girilince kabul edilmeli; yazılar güncellenmeli.
+        import customtkinter as ctk
+        from okul_zili.ui.settings_window import SettingsWindow
+        self.app.cfg["level"] = "uzman"
+        s = SettingsWindow(self.win, self.app)
+        try:
+            s._ensure_built("Ders Saatleri")
+            s.update()
+            tab = s.tabs.tab("Ders Saatleri")
+            entries = self._find(tab, ctk.CTkEntry)
+            first = entries[0]
+            fixed = [e for e in entries if e.cget("placeholder_text") == "SS:DD"][-1]
+            first.delete(0, "end")
+            first.insert(0, "09:00")
+            first._entry.event_generate("<FocusOut>")
+            s.update()
+            texts = [w.cget("text") for w in self._find(tab, ctk.CTkSwitch)]
+            self.assertIn("09:00  Öğretmen zili (1. ders başlar)", texts)
+            self.assertIn("08:58  Öğrenci zili (sabah öğrenciler sınıfa girer)", texts)
+            self.assertIn("08:50  Toplanma Zili (öğrenciler toplanır)", texts)
+            fixed.insert(0, "08:45")
+            self.assertTrue(s._collect(show_errors=False))
+            self.assertEqual(s.cfg["timing"]["assembly_time"], "08:45")
+            fixed.delete(0, "end")
+            fixed.insert(0, "09:05")
+            self.assertFalse(s._collect(show_errors=False))   # ilk dersten sonra: reddedilir
+        finally:
+            s._cancel_without_prompt()
+        self.app.cfg["level"] = "basit"
+
+    def test_morning_card_shows_saved_advanced_values(self):
+        # Uzman altındaki düzeyde kayıtlı ad, sabit saat ve «öğrenci zili de çalsın» yazılara yansır.
+        import customtkinter as ctk
+        from okul_zili.ui.settings_window import SettingsWindow
+        old = dict(self.app.cfg["timing"])
+        self.app.cfg["level"] = "gelismis"
+        self.app.cfg["timing"].update(assembly_bell=True, assembly_keep_student=True, assembly_time="08:15",
+                                      assembly_name="Bayrak")
+        s = SettingsWindow(self.win, self.app)
+        try:
+            s._ensure_built("Ders Saatleri")
+            s.update()
+            switches = {w.cget("text"): w.cget("state") for w in self._find(s.tabs.tab("Ders Saatleri"), ctk.CTkSwitch)}
+            self.assertIn("08:15  Bayrak (öğrenciler toplanır)", switches)
+            self.assertEqual(switches["08:28  Öğrenci zili (sabah öğrenciler sınıfa girer)"], "normal")
+        finally:
+            s._cancel_without_prompt()
+            self.app.cfg["timing"] = old
+            self.app.cfg["level"] = "basit"
 
     def test_main_window_ceremony_state(self):
         import time

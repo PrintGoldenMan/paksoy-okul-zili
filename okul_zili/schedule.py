@@ -10,6 +10,9 @@ from .turkish import capitalize_first, ordinal_word
 
 log = logging.getLogger(__name__)
 
+DAY_MINUTES = 24 * 60
+
+
 def parse_hm(text: str) -> int:
     """'08:30' -> gece yarısından itibaren dakika. Hatalı biçimde ValueError verir."""
     h, m = str(text).strip().replace(".", ":").split(":")
@@ -41,12 +44,14 @@ class BellEvent:
     off: str = ""        # boş değilse zil çalmaz: "Kapalı" veya "Bugün kapalı"
     shift: int = 1       # ikili öğretimde 1 = sabahçı, 2 = öğlenci
     index: int = 0       # ek zillerde listedeki sırası (aynı dakikadaki iki ek zil ayrı tutulsun)
+    dup: int = 1         # ek zillerde aynı ad ve saatteki kaçıncı zil (kimlikleri karışmasın)
 
     @property
     def bell_id(self) -> str:
         """Saatten bağımsız kalıcı kimlik (ör. "ogretmen-1"; öğlencide "s2-ogretmen-1")."""
         if self.kind == "ek":
-            return f"ek-{self.label}-{self.time_str}"
+            # Aynı ad ve saatteki ikinci, üçüncü ek zil "-2", "-3" ile ayrılır; ilkinin kimliği değişmez.
+            return f"ek-{self.label}-{self.time_str}" + (f"-{self.dup}" if self.dup > 1 else "")
         return f"{'s2-' if self.shift == 2 else ''}{self.kind}-{self.lesson}"
 
     @property
@@ -65,6 +70,8 @@ def auto_lessons(timing: dict) -> list:
     lessons = []
     for i in range(1, int(timing["lesson_count"]) + 1):
         start, end = t, t + int(timing["lesson_minutes"])
+        if end >= DAY_MINUTES:
+            break   # gece yarısını geçen dersler yok sayılır (zil saati ertesi güne kaymasın)
         lessons.append((start, end))
         gap = int(timing["lunch_minutes"]) if i == int(timing["lunch_after"]) else int(timing["break_minutes"])
         t = end + gap
@@ -159,17 +166,18 @@ def profile_name_for_date(cfg: dict, date: dt.date):
 def lessons_for_weekday(cfg: dict, weekday: int) -> list:
     """Verilen gün için [(başlangıç, bitiş), ...] listesi (dakika)."""
     override = cfg.get("day_overrides", {}).get(str(weekday))
-    if override:
+    if override and isinstance(override, list):
         rows = override
     elif cfg.get("schedule_mode") == "manual":
         rows = cfg.get("manual_lessons", [])
     else:
         return auto_lessons(cfg["timing"])
     out = []
-    for start, end in rows:
+    for row in rows if isinstance(rows, list) else []:
         try:
+            start, end = row
             out.append((parse_hm(start), parse_hm(end)))
-        except ValueError:
+        except (ValueError, TypeError):
             continue
     out.sort()
     return out
@@ -255,7 +263,8 @@ def assembly_minute(cfg, first_start, shift=1, weekday=None):
                 return minute
         except (TypeError, ValueError):
             pass
-    return first_start - before
+    # İlk ders gece yarısından hemen sonraysa (ör. 00:05) toplanma zili önceki güne düşer: çalmaz.
+    return first_start - before if first_start - before >= 0 else None
 
 
 def assembly_name(cfg) -> str:
@@ -289,14 +298,15 @@ def events_for_lessons(cfg: dict, lessons: list, shift=1, shift_name="", timing=
             student = start - offset
             if prev_end is None:
                 e = _bell(cfg, student, "ogrenci", i, "", prefix + "Öğrenciler sınıfa girer", shift)
-                if not cfg["timing"].get("morning_student_bell", True):
+                # Sabah Zilleri ayarı yalnızca sabahçıların / tek grubun ilk dersi içindir.
+                if shift == 1 and not cfg["timing"].get("morning_student_bell", True):
                     e.off = "Kapalı"   # Sabah Zilleri ayarından kapatıldı; listede görünür ama çalmaz
                 events.append(e)
             elif student > prev_end:
                 note = "Öğle arası bitmek üzere" if is_lunch(i - 1, start - prev_end) else "Teneffüs bitmek üzere"
                 events.append(_bell(cfg, student, "ogrenci", i, "", prefix + note, shift))
         e = _bell(cfg, start, "ogretmen", i, "", f"{prefix}{i}. ders başlar", shift)
-        if i == 1 and not cfg["timing"].get("morning_teacher_bell", True):
+        if i == 1 and shift == 1 and not cfg["timing"].get("morning_teacher_bell", True):
             e.off = "Kapalı"
         events.append(e)
         if i == len(lessons):
@@ -317,23 +327,30 @@ def events_for_weekday(cfg: dict, weekday: int) -> list:
     for shift, name, lessons, timing in shifts_for_weekday(cfg, weekday):
         events += events_for_lessons(cfg, lessons, shift=shift, shift_name=name, timing=timing, weekday=weekday)
     events += extra_events(cfg, weekday)
+    # Elle düzenlenmiş aşırı ayarlar (ör. 00:01'deki dersin 2 dk önceki zili) günün dışına taşmasın.
+    events = [e for e in events if 0 <= e.minute < DAY_MINUTES]
     events.sort(key=lambda e: (e.minute, {"cikis": 0, "ek": 1, "toplanma": 2, "ogrenci": 2, "ogretmen": 3}[e.kind]))
     return events
 
 
 def extra_events(cfg: dict, weekday: int) -> list:
     out = []
+    # (ad, dakika) -> listede kaçıncı kez görüldü; gün ve açık/kapalı durumundan bağımsız sayılır ki
+    # aynı zilin kimliği her gün aynı kalsın.
+    seen = {}
     for i, e in enumerate(cfg.get("extra_bells", [])):
         try:
-            if not e.get("enabled", True) or weekday not in e.get("days", []):
-                continue
             try:
                 minute = parse_hm(e["time"])
             except (KeyError, ValueError):
                 continue
+            label = e.get("label") or "Ek Zil"
+            seen[(label, minute)] = seen.get((label, minute), 0) + 1
+            if not e.get("enabled", True) or weekday not in e.get("days", []):
+                continue
             text = _fill(e.get("text") or "", 0, minute)
             out.append(BellEvent(
-                minute=minute, kind="ek", label=e.get("label") or "Ek Zil", note="Ek zil",
+                minute=minute, kind="ek", label=label, note="Ek zil", dup=seen[(label, minute)],
                 sound=e.get("sound") or "", text=text,
                 tts=bool(text) and cfg["tts"].get("enabled", False),
                 # «Sonuna kadar çal» seçiliyse süre sınırı yok (None): ses ya da seçilen bölümü bir kez tam çalar.
@@ -361,7 +378,8 @@ def events_for_date(cfg: dict, date: dt.date) -> list:
     for e in events:
         if e.off:
             continue
-        if half and e.minute >= half[1]:
+        # Yarım gün tatil: tam o dakikada biten dersin çıkış zili yine çalar.
+        if half and (e.minute > half[1] or (e.minute == half[1] and e.kind != "cikis")):
             e.off = "Tatil (yarım gün)"
         elif is_disabled(cfg, date.weekday(), e.bell_id):
             e.off = "Kapalı"

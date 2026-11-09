@@ -173,8 +173,9 @@ jobs:
           cp installer/linux/kur.sh installer/linux/BENIOKU.txt "$P/"
           cp assets/okul_zili.png "$P/okulzili.png"
           chmod +x "$P/okulzili" "$P/kur.sh"
-          test "$("$P/okulzili" --version)" = "$V"   # kur.sh sürümü böyle okur
-          (cd "$P" && sha256sum okulzili okulzili.png > SHA256SUMS)
+          test "$("$P/okulzili" --version)" = "$V"   # SURUM dosyası yoksa kur.sh sürümü böyle okur
+          echo "$V" > "$P/SURUM"                      # kur.sh sürümü programı çalıştırmadan buradan okur
+          (cd "$P" && sha256sum okulzili okulzili.png SURUM > SHA256SUMS)
           tar czf "dist/OkulZili-Linux-x86_64-$V.tar.gz" "$P"
           ls -la dist
 

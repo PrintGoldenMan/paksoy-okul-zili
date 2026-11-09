@@ -99,6 +99,89 @@ class ExtraBellTests(unittest.TestCase):
             s._tick(dt.datetime(2026, 10, 26, 9, 4, 30) + dt.timedelta(seconds=sec))
         self.assertEqual(player.rung.count("09:05 ek"), 2)
 
+    def test_same_label_and_time_have_separate_ids(self):
+        # İlk zilin kimliği eskisi gibi kalır (kayıtlı kapatma listeleri geçerli); sonrakiler "-2", "-3" alır.
+        cfg = config.default_config()
+        bell = {"enabled": True, "time": "08:20", "days": [0, 1], "label": "A"}
+        cfg["extra_bells"] = [dict(bell, days=[1]), dict(bell), dict(bell)]
+        self.assertEqual([e.bell_id for e in schedule.extra_events(cfg, 1)],
+                         ["ek-A-08:20", "ek-A-08:20-2", "ek-A-08:20-3"])
+        # Pazartesi ilk zil yok; kimlikler yine aynı (güne göre değişmez)
+        self.assertEqual([e.bell_id for e in schedule.extra_events(cfg, 0)], ["ek-A-08:20-2", "ek-A-08:20-3"])
+        cfg["skip_today"] = {"date": MONDAY.isoformat(), "ids": ["ek-A-08:20-2"]}
+        offs = [e.off for e in schedule.events_for_date(cfg, MONDAY) if e.kind == "ek"]
+        self.assertEqual(offs, ["Bugün kapalı", ""])
+
+
+class HalfDayTests(unittest.TestCase):
+    def test_exit_bell_at_cutoff_still_rings(self):
+        cfg = config.default_config()
+        cfg["holidays"] = [{"start": MONDAY.isoformat(), "end": MONDAY.isoformat(), "name": "Yarım", "from": "12:30"}]
+        cfg["extra_bells"] = [{"enabled": True, "time": "12:30", "days": [0], "label": "Ek"}]
+        off = {(e.time_str, e.kind): e.off for e in schedule.events_for_date(cfg, MONDAY)}
+        self.assertEqual(off[("12:30", "cikis")], "")          # 5. dersin çıkış zili çalar
+        self.assertEqual(off[("12:30", "ek")], "Tatil (yarım gün)")
+        self.assertEqual(off[("13:08", "ogrenci")], "Tatil (yarım gün)")
+        self.assertEqual(off[("11:50", "ogretmen")], "")
+
+
+class TimingLimitTests(unittest.TestCase):
+    def test_huge_and_negative_values_are_clamped(self):
+        cfg = _clean({"timing": {"lesson_count": 10 ** 7, "lesson_minutes": -5, "break_minutes": 10 ** 9,
+                                 "lunch_minutes": -1, "student_offset": -3, "lunch_after": 99,
+                                 "assembly_minutes": 0, "first_lesson": "99:99"},
+                      "second_shift": {"timing": {"lesson_count": 10 ** 6, "student_offset": "x"}},
+                      "profiles": {"P": {"timing": {"lesson_count": 500, "lesson_minutes": 1000}}}})
+        t = cfg["timing"]
+        self.assertEqual((t["lesson_count"], t["lesson_minutes"], t["break_minutes"], t["lunch_minutes"],
+                          t["student_offset"], t["lunch_after"], t["assembly_minutes"], t["first_lesson"]),
+                         (20, 5, 240, 0, 0, 20, 1, "08:30"))
+        self.assertEqual(cfg["second_shift"]["timing"]["lesson_count"], 20)
+        self.assertEqual(cfg["second_shift"]["timing"]["student_offset"], 2)
+        self.assertEqual((cfg["profiles"]["P"]["timing"]["lesson_count"],
+                          cfg["profiles"]["P"]["timing"]["lesson_minutes"]), (20, 240))
+        start = time.monotonic()
+        schedule.events_for_date(cfg, MONDAY)
+        self.assertLess(time.monotonic() - start, 1)
+
+    def test_valid_config_unchanged(self):
+        cfg = config.default_config()
+        cfg["timing"].update(lesson_count=12, lesson_minutes=90, first_lesson="7.40", lunch_after=12)
+        cfg["second_shift"]["enabled"] = True
+        self.assertEqual(_clean(cfg), cfg)
+
+    def test_no_bells_past_midnight(self):
+        cfg = config.default_config()
+        cfg["timing"].update(first_lesson="22:00", lesson_count=20)
+        events = schedule.events_for_date(cfg, MONDAY)
+        self.assertTrue(all(0 <= e.minute < 24 * 60 for e in events))
+        self.assertEqual(events[-1].time_str, "23:30")   # 23:40'ta başlayan ders gece yarısını geçer
+        cfg["timing"].update(first_lesson="00:01", student_offset=5)
+        self.assertEqual(schedule.events_for_date(cfg, MONDAY)[0].time_str, "00:01")
+
+
+class BrokenProfileTests(unittest.TestCase):
+    def setUp(self):
+        self.cfg = config.default_config()
+        self.cfg["profiles"] = {"Bozuk": {"day_overrides": {"0": 5}, "disabled_bells": {"all": "x"},
+                                          "second_shift": {"manual_lessons": 7, "timing": [1]},
+                                          "timing": dict(self.cfg["timing"], first_lesson="09:00")}}
+        self.cfg["profile_dates"] = [{"date": MONDAY.isoformat(), "profile": "Bozuk"}]
+
+    def test_profile_sections_sanitized(self):
+        p = _clean(self.cfg)["profiles"]["Bozuk"]
+        self.assertEqual((p["day_overrides"], p["disabled_bells"]), ({}, {}))
+        self.assertEqual(p["second_shift"]["manual_lessons"], [])
+        self.assertIsInstance(p["second_shift"]["timing"], dict)
+        events = safe_events(_clean(self.cfg), MONDAY)
+        self.assertEqual(events[1].time_str, "09:00")   # program uygulandı, sıfırlanmadı
+
+    def test_unsanitized_override_does_not_raise(self):
+        cfg = dict(self.cfg, day_overrides={"0": [["08:30", "09:10"], 5, None, ["x"]]})
+        self.assertEqual(schedule.lessons_for_weekday(cfg, 0), [(510, 550)])
+        cfg["day_overrides"] = {"0": 5}
+        self.assertEqual(len(schedule.lessons_for_weekday(cfg, 0)), 8)   # bozuk gün yok sayılır
+
 
 class InfinityTests(unittest.TestCase):
     def setUp(self):

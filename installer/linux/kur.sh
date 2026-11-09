@@ -102,8 +102,15 @@ evet_mi() {
 surum_buyuk() { [ "$1" != "$2" ] && [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | tail -n1)" = "$1" ]; }
 
 surum_oku() {   # $1: paketteki (yeni) program → sürüm (okunamazsa boş)
+    # Paketteki SURUM dosyası (SHA256SUMS ile doğrulanır): program çalıştırılmaz. Eski paketlerde yoksa
+    # program --version ile çalıştırılır; tek dosyalık program yavaş bilgisayarda geç açılabildiği için süre uzun.
+    local dosya; dosya="$(dirname "$1")/SURUM"
+    if [ -f "$dosya" ]; then
+        head -n1 "$dosya" 2>/dev/null | tr -d '[:space:]' | grep -E '^[0-9]+(\.[0-9]+)+$' || true
+        return 0
+    fi
     [ -x "$1" ] || return 0
-    timeout 20 "$1" --version 2>/dev/null | tail -n1 | tr -d '[:space:]' | grep -E '^[0-9]+(\.[0-9]+)+$' || true
+    timeout 90 "$1" --version 2>/dev/null | tail -n1 | tr -d '[:space:]' | grep -E '^[0-9]+(\.[0-9]+)+$' || true
 }
 
 kurulu_surum() {   # $1: kurulu program → yanındaki sürüm dosyasından sürüm (yoksa boş)
@@ -456,7 +463,7 @@ kur() {
     baslik "Paket"
     paketi_dogrula
     YENI_SURUM="$(surum_oku "$PAKET_DIZINI/okulzili")"
-    [ -n "$YENI_SURUM" ] || olumcul "Paketteki program çalıştırılamadı (dosya bozuk olabilir)."
+    [ -n "$YENI_SURUM" ] || olumcul "Paketteki programın sürümü okunamadı (dosya bozuk olabilir)."
 
     baslik "Kurulacak sürüm: $YENI_SURUM"
     if [ -n "$ESKI_SURUM" ]; then

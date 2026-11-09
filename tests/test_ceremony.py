@@ -82,6 +82,28 @@ class HoldTests(unittest.TestCase):
                 self.assertEqual(self.player.rung, [], now)
         self.assertEqual(self.player.rung, ["09:18 ogrenci"])
 
+    def test_newer_bell_in_gap_supersedes_held_bell(self):
+        # Marş 09:17:50 – 09:19:58: 09:18 öğrenci zili bekler; tören bittikten sonraki 3 sn'lik arada
+        # 09:20 öğretmen zili çalar. Eski öğrenci zili artık arkasından çalmamalı.
+        run(self.s, self.day, 4 * 60, self.player,
+            (self.day.replace(second=50), self.day.replace(minute=19, second=58)))
+        self.assertEqual(self.player.rung, ["09:20 ogretmen"])
+        self.assertEqual(self.s.held, [])
+
+    def test_held_bells_in_same_minute_all_ring(self):
+        # 09:20'de öğretmen zili ile bir ek zil: ikisi de törende bekler, tören bitince ikisi de çalar.
+        self.cfg["extra_bells"] = [{"enabled": True, "time": "09:20", "days": [0], "label": "Duyuru"}]
+        run(self.s, self.day, 5 * 60, self.player,
+            (self.day.replace(second=30), self.day.replace(minute=21, second=0)))
+        self.assertEqual(self.player.rung, ["09:20 ek", "09:20 ogretmen"])
+
+    def test_assembly_and_extra_bell_same_minute_after_ceremony(self):
+        self.cfg["timing"]["assembly_bell"] = True
+        self.cfg["extra_bells"] = [{"enabled": True, "time": "08:20", "days": [0], "label": "Ek"}]
+        start = dt.datetime(2026, 10, 26, 8, 19, 0)
+        run(self.s, start, 3 * 60, self.player, (start.replace(second=50), start.replace(minute=21)))
+        self.assertEqual(self.player.rung, ["08:20 ek", "08:20 toplanma"])
+
 
 class PlayerCeremonyTests(unittest.TestCase):
     def test_ceremony_flag_and_stop(self):

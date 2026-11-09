@@ -253,6 +253,7 @@ class LessonTable(ctk.CTkFrame):
     def __init__(self, master, lessons, fill_source=None):
         super().__init__(master, fg_color="transparent")
         self.fill_source = fill_source
+        self.on_change = None   # saatler değişince çağrılır (ör. Sabah Zilleri yazıları güncellensin)
         self.rows = []
         self.table = ctk.CTkFrame(self, fg_color="transparent")
         self.table.pack(fill="x")
@@ -284,6 +285,9 @@ class LessonTable(ctk.CTkFrame):
         e = time_entry(row, end)
         e.pack(side="left")
         item = (row, lbl, s, e)
+        for entry in (s, e):
+            for event in ("<KeyRelease>", "<FocusOut>"):
+                entry.bind(event, self._changed, add="+")
         ctk.CTkButton(row, text="✕", width=30, fg_color="transparent", text_color=theme.DANGER,
                       hover_color=theme.ROW_ALT, command=lambda: self._remove(item)).pack(side="left", padx=8)
         self.rows.append(item)
@@ -307,6 +311,11 @@ class LessonTable(ctk.CTkFrame):
     def _renumber(self):
         for i, (_, lbl, _, _) in enumerate(self.rows, start=1):
             lbl.configure(text=f"{i}. ders")
+        self._changed()
+
+    def _changed(self, *_):
+        if self.on_change:
+            self.on_change()
 
     def get(self, what="Ders saatleri"):
         out = []
@@ -381,6 +390,8 @@ class SettingsWindow(ctk.CTkToplevel):
             self.tabs.destroy()
         self._collectors = []
         self._pickers = []
+        self._assembly_var = None
+        self._assembly_widgets = []
         self.level_desc.configure(text=f"{LEVEL_NAMES[self.level]}: {LEVEL_DESCRIPTIONS[self.level]}")
         self.tabs = ctk.CTkTabview(self, fg_color=theme.WINDOW_BG, segmented_button_selected_color=theme.ACCENT,
                                    command=lambda: self._ensure_built(self.tabs.get()))
@@ -494,53 +505,83 @@ class SettingsWindow(ctk.CTkToplevel):
                  sticky="w", pady=(4, 0))
         return lbl
 
-    def _morning_card(self, f):
-        """İlk dersin sabah zillerini (ör. 08:28 öğrenci, 08:30 öğretmen) açıp kapatma."""
+    def _morning_card(self, f, first_source=None, offset_source=None):
+        """İlk dersin sabah zillerini (ör. 08:28 öğrenci, 08:30 öğretmen) açıp kapatma.
+        first_source / offset_source: aynı sekmedeki (henüz kaydedilmemiş) girişlerden pazartesi ilk dersin
+        dakikasını ve öğrenci zili dakikasını verir; yazılar bunlara göre güncellenir.
+        Döndürür: (collect, refresh) – collect, ders saatleri toplandıktan sonra çağrılmalıdır."""
         t = self.cfg["timing"]
-        lessons = schedule.lessons_for_weekday(self.cfg, 0) or [(parse_hm(t["first_lesson"]), 0)]
-        first = lessons[0][0]
+
+        def saved_first():
+            """Pazartesi ilk dersin dakikası (self.cfg'deki, yani toplanmış ayarlardan)."""
+            lessons = schedule.lessons_for_weekday(self.cfg, 0) or [(parse_hm(t["first_lesson"]), 0)]
+            return lessons[0][0]
+
+        def first_now():
+            if first_source:
+                try:
+                    return first_source()
+                except (ValueError, IndexError):
+                    pass
+            try:
+                return saved_first()
+            except ValueError:
+                return parse_hm(config.DEFAULTS["timing"]["first_lesson"])
+
+        def offset_now():
+            if offset_source:
+                try:
+                    return int(offset_source())
+                except ValueError:
+                    pass
+            return int(t["student_offset"])
+
         b = self._card(f, "Sabah Zilleri", "İlk dersten önce çalan zilleri buradan açıp kapatabilirsiniz. "
                                            "Kapalı olan zil hiçbir gün çalmaz.")
         student = ctk.BooleanVar(value=t.get("morning_student_bell", True))
         teacher = ctk.BooleanVar(value=t.get("morning_teacher_bell", True))
         assembly = ctk.BooleanVar(value=bool(t.get("assembly_bell", False)))
+        self._assembly_var = assembly   # Zil Sesleri / Sesli Anons sekmelerindeki toplanma alanları için
         assembly_sw = ctk.CTkSwitch(b, text="", variable=assembly, font=theme.font(14))
         assembly_sw.grid(row=0, column=0, columnspan=2, sticky="w", pady=4)
         minutes = Spin(b, t.get("assembly_minutes", DEFAULT_ASSEMBLY_MINUTES), 3, 60, suffix="dk önce")
         minutes.grid(row=0, column=2, sticky="w", padx=(10, 0))
         student_sw = ctk.CTkSwitch(b, text="", variable=student, font=theme.font(14))
         student_sw.grid(row=1, column=0, columnspan=3, sticky="w", pady=4)
-        ctk.CTkSwitch(b, text=f"{fmt_hm(first)}  Öğretmen zili (1. ders başlar)",
-                      variable=teacher, font=theme.font(14)).grid(row=2, column=0, columnspan=3, sticky="w", pady=4)
+        teacher_sw = ctk.CTkSwitch(b, text="", variable=teacher, font=theme.font(14))
+        teacher_sw.grid(row=2, column=0, columnspan=3, sticky="w", pady=4)
         self._hint(b, "Toplanma zili açıkken sabah ilk dersten önce yalnızca toplanma zili çalar; öğrenciler "
                       "toplandığı için o sabahki öğrenci zili çalmaz. Öğretmen zili ders başında çalar.", row=3)
 
-        adv = self._assembly_advanced(b, t, first) if self._at_least("uzman") else None
+        adv = self._assembly_advanced(b, t, saved_first) if self._at_least("uzman") else None
 
         def refresh(*_):
+            first = first_now()
             try:
                 m = minutes.get()
             except ValueError:
                 m = DEFAULT_ASSEMBLY_MINUTES
-            at = first - m
-            name = "Toplanma zili"
-            keep = False
+            # Gelişmiş ayarlar bu düzeyde görünmüyorsa kayıtlı ad, sabit saat ve öğrenci zili geçerlidir.
+            timing = dict(t, assembly_bell=True, assembly_minutes=m)
             if adv:
-                name = adv["name"].get().strip() or name
-                keep = bool(adv["keep"].get())
-                try:
-                    fixed = parse_hm(adv["time"].get().strip()) if adv["time"].get().strip() else None
-                except ValueError:
-                    fixed = None
-                if fixed is not None and fixed < first:
-                    at = fixed
-            assembly_sw.configure(text=f"{fmt_hm(at)}  {name} (öğrenciler toplanır)")
+                timing.update(assembly_name=adv["name"].get(), assembly_time=adv["time"].get().strip(),
+                              assembly_keep_student=bool(adv["keep"].get()))
+                adv["hint"].configure(text=f"boş = ilk dersten dakika önce · {fmt_hm(first)}'dan önce olmalı")
+            at = schedule.assembly_minute({"timing": timing}, first)
+            name = schedule.assembly_name({"timing": timing})
+            keep = bool(timing.get("assembly_keep_student"))
+            assembly_sw.configure(text=f"{fmt_hm(at) if at is not None else '--:--'}  {name} (öğrenciler toplanır)")
             off = bool(assembly.get()) and not keep
             student_sw.configure(
                 state="disabled" if off else "normal",
-                text=f"{fmt_hm(first - int(t['student_offset']))}  Öğrenci zili (sabah öğrenciler sınıfa girer)"
+                text=f"{fmt_hm(first - offset_now())}  Öğrenci zili (sabah öğrenciler sınıfa girer)"
                      + ("  – toplanma zili açıkken çalmaz" if off else ""))
-        assembly_sw.configure(command=refresh)
+            teacher_sw.configure(text=f"{fmt_hm(first)}  Öğretmen zili (1. ders başlar)")
+
+        def on_assembly():
+            refresh()
+            self._show_assembly_widgets()
+        assembly_sw.configure(command=on_assembly)
         minutes.var.trace_add("write", refresh)
         if adv:
             for key in ("name", "time"):
@@ -558,10 +599,12 @@ class SettingsWindow(ctk.CTkToplevel):
                 raise ValueError(f"Toplanma zili: {exc}")
             if adv:
                 adv["collect"]()
-        self._collectors.append(collect)
+            refresh()
+        return collect, refresh
 
-    def _assembly_advanced(self, b, t, first):
-        """Uzman / Profesyonel: toplanma zilinin adı, sabit saati, günleri ve diğer seçenekleri."""
+    def _assembly_advanced(self, b, t, saved_first):
+        """Uzman / Profesyonel: toplanma zilinin adı, sabit saati, günleri ve diğer seçenekleri.
+        saved_first: toplanmış ayarlara göre pazartesi ilk dersin dakikası (sabit saat bundan önce olmalı)."""
         outer = ctk.CTkFrame(b, fg_color=theme.ROW_ALT, corner_radius=10)
         outer.grid(row=4, column=0, columnspan=4, sticky="ew", pady=(10, 0))
         box = ctk.CTkFrame(outer, fg_color="transparent")
@@ -573,7 +616,9 @@ class SettingsWindow(ctk.CTkToplevel):
             name.insert(0, t["assembly_name"])
         labeled_row(box, 1, "Zilin adı", name, "ör. Bayrak Töreni Zili")
         fixed = time_entry(box, t.get("assembly_time", ""))
-        labeled_row(box, 2, "Sabit saat", fixed, f"boş = ilk dersten dakika önce · {fmt_hm(first)}'dan önce olmalı")
+        labeled_row(box, 2, "Sabit saat", fixed)
+        hint = ctk.CTkLabel(box, text="", text_color=theme.MUTED, font=theme.font(12), anchor="w")
+        hint.grid(row=2, column=2, sticky="w", padx=(10, 0))   # ilk ders saati değişince güncellenir
         days_row = ctk.CTkFrame(box, fg_color="transparent")
         chosen = set(t.get("assembly_days") or range(7))
         day_vars = []
@@ -596,6 +641,8 @@ class SettingsWindow(ctk.CTkToplevel):
                     minute = parse_hm(text)
                 except ValueError:
                     raise ValueError("Toplanma zili: sabit saat SS:DD biçiminde olmalı (ör. 08:15).")
+                # Ders saatleri bu toplayıcıdan önce toplandığı için ilk ders güncel ayarlardan hesaplanır.
+                first = saved_first()
                 if minute >= first:
                     raise ValueError(f"Toplanma zili: sabit saat ({fmt_hm(minute)}) ilk dersten "
                                      f"({fmt_hm(first)}) önce olmalı.")
@@ -605,7 +652,23 @@ class SettingsWindow(ctk.CTkToplevel):
                 raise ValueError("Toplanma zili: en az bir gün seçin (hiç çalmasın istiyorsanız kapatın).")
             t.update(assembly_name=name.get().strip() or "Toplanma Zili", assembly_time=text, assembly_days=days,
                      assembly_keep_student=bool(keep.get()), assembly_second_shift=bool(second.get()))
-        return {"name": name, "time": fixed, "keep": keep, "keep_box": keep_box, "collect": collect}
+        return {"name": name, "time": fixed, "keep": keep, "keep_box": keep_box, "hint": hint, "collect": collect}
+
+    def _assembly_enabled(self):
+        """Toplanma zili açık mı? Ders Saatleri sekmesi çizildiyse oradaki anahtar, değilse kayıtlı ayar."""
+        var = getattr(self, "_assembly_var", None)
+        return bool(var.get()) if var is not None else bool(self.cfg["timing"].get("assembly_bell"))
+
+    def _show_assembly_widgets(self):
+        """Zil Sesleri / Sesli Anons sekmelerindeki toplanma zili alanlarını anahtara göre gösterir ya da gizler.
+        Alanlar her zaman çizilir ve toplanır; böylece zil sonradan açılınca da ayarlanabilir."""
+        on = self._assembly_enabled()
+        for w in getattr(self, "_assembly_widgets", []):
+            if w.winfo_exists():
+                if on:
+                    w.grid()
+                else:
+                    w.grid_remove()
 
     # -- sekmeler -----------------------------------------------------------
 
@@ -630,7 +693,7 @@ class SettingsWindow(ctk.CTkToplevel):
             self.app.player.preview_sound(rotation.effective_sound(cfg["bells"]["ogretmen"]), d)
         ctk.CTkButton(b, text="▶ Sesi dene", width=110, command=try_sound).grid(row=0, column=3, padx=8)
 
-        self._morning_card(f)
+        self._collectors.append(self._morning_card(f)[0])
 
         b = self._card(f, "Başlangıç")
         auto_var = ctk.BooleanVar(value=cfg.get("autostart", False))
@@ -840,7 +903,21 @@ class SettingsWindow(ctk.CTkToplevel):
         offset = Spin(b, t["student_offset"], 0, 15, suffix="dakika önce")
         labeled_row(b, 0, "Öğrenci zili, dersten", offset, "0 = öğrenci zili çalmasın")
 
-        self._morning_card(f)
+        def first_on_screen():
+            """Pazartesi ilk dersin ekrandaki (henüz kaydedilmemiş) saati; hatalıysa ValueError."""
+            if auto_widgets:
+                screen = dict(cfg, timing=dict(t, first_lesson=auto_widgets[0].get().strip()))
+            else:
+                screen = dict(cfg, manual_lessons=table.get())
+            return schedule.lessons_for_weekday(screen, 0)[0][0]
+
+        morning_collect, morning_refresh = self._morning_card(f, first_on_screen, offset.get)
+        offset.var.trace_add("write", morning_refresh)
+        if auto_widgets:
+            for event in ("<KeyRelease>", "<FocusOut>"):
+                auto_widgets[0].bind(event, morning_refresh, add="+")
+        else:
+            table.on_change = morning_refresh
 
         def lessons_now():
             return schedule.lessons_for_weekday(dict(cfg, day_overrides={}), 0)
@@ -869,6 +946,8 @@ class SettingsWindow(ctk.CTkToplevel):
                                  f"çalamayacağı için bazı öğrenci zilleri çalmaz. Lütfen "
                                  f"{max(0, shortest - 1)} dakika veya daha az girin.")
             second_collect()
+            # Sabah zilleri en son: toplanma zilinin sabit saati yeni ders saatlerine göre denetlenir.
+            morning_collect()
         self._collectors.append(collect)
 
         b = self._card(f, "Ders Saatlerini Paylaş", "Ders saatlerini (ikili öğretim dahil) küçük bir dosyaya kaydedip "
@@ -975,8 +1054,11 @@ class SettingsWindow(ctk.CTkToplevel):
         if manual:
             ctk.CTkLabel(b, text="Öğlencilerin ders saatleri", font=theme.font(13, "bold")).grid(
                 row=1, column=0, columnspan=3, sticky="w", pady=(10, 2))
-            table = LessonTable(b, sec.get("manual_lessons") or [], fill_source=lambda: [
-                [fmt_hm(a), fmt_hm(e)] for a, e in schedule.auto_lessons(dict(cfg["timing"], **st))])
+            def auto_rows():
+                return [[fmt_hm(a), fmt_hm(e)] for a, e in schedule.auto_lessons(dict(cfg["timing"], **st))]
+            # Elle girişe yeni geçildiyse tablo boş kalmasın (kaydetmek «en az bir ders» hatası verirdi):
+            # öğlencilerin hesaplanan saatleriyle doldurulur.
+            table = LessonTable(b, sec.get("manual_lessons") or auto_rows(), fill_source=auto_rows)
             table.grid(row=2, column=0, columnspan=3, sticky="w")
             widgets = None
         else:
@@ -1071,13 +1153,16 @@ class SettingsWindow(ctk.CTkToplevel):
                       command=self.app.player.stop_preview).grid(row=0, column=3, padx=8)
 
         pickers = {}
-        for kind in BELL_TYPES + (["toplanma"] if cfg["timing"].get("assembly_bell") else []):
+        # Toplanma zilinin kartı her zaman çizilir; zil kapalıyken gizlenir (Ders Saatleri'nde açılınca görünür).
+        for kind in BELL_TYPES + ["toplanma"]:
             bell = cfg["bells"][kind]
             sub = {"ogrenci": "Teneffüs bitmeden önce çalar; öğrenciler sınıfa girer.",
                    "ogretmen": "Ders başladığında çalar; öğretmenler sınıfa girer.",
                    "cikis": "Ders bittiğinde çalar.",
                    "toplanma": "Sabah ilk dersten önce çalar; öğrenciler toplanır (Ders Saatleri → Sabah Zilleri)."}[kind]
             b = self._card(f, BELL_NAMES[kind], sub)
+            if kind == "toplanma":
+                self._assembly_widgets.append(b.master)
             ctk.CTkFrame(b, width=6, height=30, corner_radius=3, fg_color=theme.BELL_COLORS[kind]).grid(
                 row=0, column=0, rowspan=3, sticky="ns", padx=(0, 10))
             opt = ctk.CTkFrame(b, fg_color="transparent")
@@ -1121,6 +1206,8 @@ class SettingsWindow(ctk.CTkToplevel):
                     cfg["bells"][kind]["volume"] = int(w["volume"].get())
         self._collectors.append(collect)
         self._ceremony_card(f)
+        # Gizleme en sonda: _card yeni kartın satırını görünen kartları sayarak bulur.
+        self._show_assembly_widgets()
 
     def _ceremony_card(self, f):
         """Tören sesleri: ana ekrandaki «İstiklal Marşı» ve «Saygı Duruşu + İstiklal Marşı» düğmeleri."""
@@ -1412,26 +1499,32 @@ class SettingsWindow(ctk.CTkToplevel):
         r = 0
         fields = [("ogrenci", "text", "Öğrenci zili"), ("ogretmen", "text", "Öğretmen zili"),
                   ("cikis", "text", "Çıkış zili (teneffüs)"), ("cikis", "text_lunch", "Çıkış zili (öğle arası)"),
-                  ("cikis", "text_last", "Çıkış zili (son ders)")]
-        if cfg["timing"].get("assembly_bell"):
-            fields.append(("toplanma", "text", "Toplanma zili"))
+                  ("cikis", "text_last", "Çıkış zili (son ders)"),
+                  ("toplanma", "text", "Toplanma zili")]   # toplanma zili kapalıyken gizlenir
         tts_flags = {}
         for kind, key, label in fields:
+            row_widgets = []
             if kind not in tts_flags:
                 v = ctk.BooleanVar(value=cfg["bells"][kind].get("tts", True))
-                ctk.CTkCheckBox(b, text=f"{BELL_NAMES[kind]} çalınca anons yap", variable=v,
-                                font=theme.font(13, "bold")).grid(row=r, column=0, columnspan=3, sticky="w",
-                                                                  pady=(10 if r else 0, 2))
+                box = ctk.CTkCheckBox(b, text=f"{BELL_NAMES[kind]} çalınca anons yap", variable=v,
+                                      font=theme.font(13, "bold"))
+                box.grid(row=r, column=0, columnspan=3, sticky="w", pady=(10 if r else 0, 2))
+                row_widgets.append(box)
                 tts_flags[kind] = v
                 r += 1
-            ctk.CTkLabel(b, text=label, anchor="w", width=170).grid(row=r, column=0, sticky="w")
+            lbl = ctk.CTkLabel(b, text=label, anchor="w", width=170)
+            lbl.grid(row=r, column=0, sticky="w")
             e = ctk.CTkEntry(b, width=520)
             e.insert(0, cfg["bells"][kind].get(key, ""))
             e.grid(row=r, column=1, sticky="w", pady=2)
-            ctk.CTkButton(b, text="▶ Dene", width=70, command=lambda e=e: self._try_text(e.get())).grid(
-                row=r, column=2, padx=8)
+            btn = ctk.CTkButton(b, text="▶ Dene", width=70, command=lambda e=e: self._try_text(e.get()))
+            btn.grid(row=r, column=2, padx=8)
+            row_widgets += [lbl, e, btn]
+            if kind == "toplanma":
+                self._assembly_widgets.extend(row_widgets)
             texts[(kind, key)] = e
             r += 1
+        self._show_assembly_widgets()
 
         def collect():
             tc["enabled"] = bool(enabled.get())

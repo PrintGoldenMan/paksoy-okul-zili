@@ -797,7 +797,9 @@ class MainWindow(ctk.CTk):
                         self.app.player.stop()
                     elif cmd == "quit":
                         self.show_window()
-                        self._confirm_quit()
+                        # Soru penceresi açıkken de arka plan işleri ve tepsi komutları işlensin diye
+                        # kapatma sorusu bu döngünün dışında sorulur.
+                        self.after(0, self._confirm_quit)
             except queue.Empty:
                 pass
         self.after(200, self._poll_background)
@@ -838,20 +840,31 @@ class MainWindow(ctk.CTk):
             return
         if self.app.cfg.get("tray_on_close", True) and self._tray_visible():
             # Pencere gizlenir; program ve ziller çalışmaya devam eder.
-            self.withdraw()
             if not getattr(self, "_tray_hint_shown", False):
-                tray.notify("Okul Zili arka planda çalışmaya devam ediyor; ziller çalacak. Kapatmak için saatin "
-                            "yanındaki zil simgesine sağ tıklayıp «Programı kapat»ı seçin.")
                 self._tray_hint_shown = True
+                hint = ("Okul Zili arka planda çalışmaya devam ediyor; ziller çalacak. Kapatmak için saatin "
+                        "yanındaki zil simgesine sağ tıklayıp «Programı kapat»ı seçin.")
+                if not tray.notify(hint) and not self.app.cfg.get("tray_hint_shown"):
+                    # Bildirim gösterilemiyor (Linux'ta AppIndicator simgesi): açıklama bir kez, pencere
+                    # gizlenmeden önce gösterilir ve bir daha sorulmaz.
+                    messagebox.showinfo("Okul Zili", hint, parent=self)
+                    self.app.update_config(tray_hint_shown=True)
+            self.withdraw()
             return
         self._confirm_quit()
 
     def _confirm_quit(self):
-        if self.app.cfg.get("confirm_exit", True) and not messagebox.askyesno(
-                "Programı kapat",
-                "Program kapatılırsa ziller ÇALMAZ.\n\nYine de kapatmak istiyor musunuz?",
-                icon="warning", parent=self):
-            return
+        if getattr(self, "_asking_quit", False):
+            return   # soru zaten açık (ör. tepsiden iki kez «Programı kapat» seçildi)
+        self._asking_quit = True
+        try:
+            if self.app.cfg.get("confirm_exit", True) and not messagebox.askyesno(
+                    "Programı kapat",
+                    "Program kapatılırsa ziller ÇALMAZ.\n\nYine de kapatmak istiyor musunuz?",
+                    icon="warning", parent=self):
+                return
+        finally:
+            self._asking_quit = False
         self.app.quit()
 
     # -- güncelleme ----------------------------------------------------------------

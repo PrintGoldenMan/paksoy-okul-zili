@@ -82,12 +82,16 @@ class Tray:
             return _sni_host_available()
         return True
 
-    def notify(self, message, title="Okul Zili"):
-        if self.icon is not None:
-            try:
-                self.icon.notify(message, title)
-            except Exception:  # noqa: BLE001 - bildirim desteklenmiyorsa önemli değil
-                pass
+    def notify(self, message, title="Okul Zili") -> bool:
+        """Simgenin yanında bildirim gösterir. Gösterilemediyse False (ör. Linux'taki AppIndicator
+        simgesinde pystray bildirimi desteklemez)."""
+        if self.icon is None:
+            return False
+        try:
+            self.icon.notify(message, title)
+            return True
+        except Exception:  # noqa: BLE001 - bildirim desteklenmiyorsa çağıran başka yoldan haber verir
+            return False
 
     def set_tooltip(self, text):
         if self.icon is not None:

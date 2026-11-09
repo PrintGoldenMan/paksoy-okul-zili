@@ -38,6 +38,13 @@ class DoubleShiftTests(unittest.TestCase):
         self.assertEqual(off[(2, "s2-ogretmen-1")], "Kapalı")
         self.assertEqual(off[(1, "ogretmen-1")], "")
 
+    def test_morning_bell_switches_only_affect_first_shift(self):
+        # «Sabah Zilleri» kapatılınca öğlencilerin ilk ders zilleri yine çalar.
+        self.cfg["timing"].update(morning_student_bell=False, morning_teacher_bell=False)
+        off = {e.bell_id: e.off for e in schedule.events_for_date(self.cfg, MONDAY)}
+        self.assertEqual((off["ogrenci-1"], off["ogretmen-1"]), ("Kapalı", "Kapalı"))
+        self.assertEqual((off["s2-ogrenci-1"], off["s2-ogretmen-1"]), ("", ""))
+
     def test_status_across_shifts(self):
         self.assertEqual(schedule.current_status(self.cfg, at(7, 0))[1], "Sabahçı dersleri 07:30'da başlıyor")
         self.assertEqual(schedule.current_status(self.cfg, at(8, 0))[0], "Sabahçı · 1. ders devam ediyor")

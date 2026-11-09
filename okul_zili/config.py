@@ -147,6 +147,7 @@ DEFAULTS = {
     "profile_dates": [],   # [{"date": "2026-11-10", "profile": "Kısaltılmış Ders"}]
     "grace_seconds": 45,
     "tray_on_close": True,       # pencere kapatılınca sistem tepsisine küçült (program çalışmaya devam eder)
+    "tray_hint_shown": False,    # bildirimsiz tepside «arka planda çalışıyor» açıklaması bir kez gösterildi
     "watchdog": True,            # program beklenmedik şekilde kapanırsa 5 dk içinde yeniden başlat (Windows)
     "keep_awake": True,          # okul saatlerinde bilgisayarın uykuya geçmesini engelle
     "check_updates": True,       # yeni sürüm çıkınca haber ver
@@ -300,6 +301,68 @@ def _number(value, default, low, high):
     return max(low, min(high, value))
 
 
+# Ders saati sayıları için sınırlar: elle düzenlenmiş dosyadaki aşırı değerler (ör. 10 milyon ders,
+# eksi dakika) zamanlayıcıyı kilitlemesin. Ayarlar penceresinin izin verdiği değerler bu aralıklardadır.
+TIMING_LIMITS = {"lesson_count": (1, 20), "lesson_minutes": (5, 240), "break_minutes": (0, 240),
+                 "lunch_minutes": (0, 240), "lunch_after": (0, 20), "student_offset": (0, 60),
+                 "assembly_minutes": (1, 120)}
+
+
+def _is_hm(text) -> bool:
+    """"08:30" / "8.30" biçiminde geçerli bir saat mi (schedule.parse_hm'in kabul ettiği gibi)?"""
+    if not isinstance(text, str):
+        return False
+    try:
+        h, m = (int(x) for x in text.strip().replace(".", ":").split(":"))
+    except ValueError:
+        return False
+    return 0 <= h < 24 and 0 <= m < 60
+
+
+def _valid_timing(t: dict, defaults: dict) -> dict:
+    """Ders saati ayarlarını (timing) sınırlar içine alır; geçerli değerler olduğu gibi kalır."""
+    for key, (low, high) in TIMING_LIMITS.items():
+        if key in t:
+            default = defaults.get(key, DEFAULTS["timing"][key])
+            t[key] = int(_number(t[key], default, low, high))
+    if "first_lesson" in t and not _is_hm(t["first_lesson"]):
+        t["first_lesson"] = defaults.get("first_lesson", DEFAULTS["timing"]["first_lesson"])
+    if "assembly_days" in t:
+        days = t["assembly_days"]
+        days = sorted({d for d in days if isinstance(d, int) and 0 <= d <= 6}) if isinstance(days, list) else []
+        # Boş liste «hiç çalmaz» demektir; pencere ise en az bir gün ister ve boşu bütün günler gösterir.
+        t["assembly_days"] = days or list(range(7))
+    if "assembly_time" in t:
+        at = t["assembly_time"]
+        if not isinstance(at, str) or (at and not re.fullmatch(r"([01]?\d|2[0-3]):[0-5]\d", at.strip())):
+            t["assembly_time"] = ""
+    if "assembly_name" in t and not isinstance(t["assembly_name"], str):
+        t["assembly_name"] = DEFAULTS["timing"]["assembly_name"]
+    return t
+
+
+def _valid_overrides(value) -> dict:
+    """Güne özel ders saatleri: {"0".."6": [["SS:DD", "SS:DD"], ...]}; bozuk günler atılır."""
+    overrides = value if isinstance(value, dict) else {}
+    return {str(k): rows for k, v in overrides.items()
+            if str(k) in {str(i) for i in range(7)} and (rows := _valid_rows(v))}
+
+
+def _valid_disabled(value) -> dict:
+    disabled = value if isinstance(value, dict) else {}
+    return {str(k): [x for x in v if isinstance(x, str)] for k, v in disabled.items() if isinstance(v, list)}
+
+
+def _valid_second_shift(second) -> dict:
+    if not isinstance(second, dict):
+        return copy.deepcopy(DEFAULTS["second_shift"])
+    second["manual_lessons"] = _valid_rows(second.get("manual_lessons"))
+    if not isinstance(second.get("timing"), dict):
+        second["timing"] = copy.deepcopy(DEFAULTS["second_shift"]["timing"])
+    _valid_timing(second["timing"], DEFAULTS["second_shift"]["timing"])
+    return second
+
+
 def _valid_extra_bells(items) -> list:
     """Ek zillerin alanlarını denetler: türü yanlış alan varsayılana döner, saati bozuk zil atılır."""
     out = []
@@ -329,41 +392,32 @@ def _sanitize(cfg: dict) -> dict:
     cfg["manual_lessons"] = _valid_rows(cfg.get("manual_lessons"))
     if not cfg["manual_lessons"]:
         cfg["manual_lessons"] = copy.deepcopy(DEFAULTS["manual_lessons"])
-    overrides = cfg.get("day_overrides") if isinstance(cfg.get("day_overrides"), dict) else {}
-    cfg["day_overrides"] = {str(k): rows for k, v in overrides.items()
-                            if str(k) in {str(i) for i in range(7)} and (rows := _valid_rows(v))}
+    cfg["day_overrides"] = _valid_overrides(cfg.get("day_overrides"))
     cfg["active_days"] = sorted({d for d in cfg.get("active_days", []) if isinstance(d, int) and 0 <= d <= 6})
     cfg["holidays"] = _valid_holidays(dicts(cfg.get("holidays")))
     cfg["extra_bells"] = _valid_extra_bells(dicts(cfg.get("extra_bells")))
     cfg["profile_dates"] = [d for d in dicts(cfg.get("profile_dates"))
                             if isinstance(d.get("date"), str) and isinstance(d.get("profile"), str)]
+    cfg["second_shift"] = _valid_second_shift(cfg.get("second_shift"))
+    if not isinstance(cfg.get("short_day"), dict):
+        cfg["short_day"] = copy.deepcopy(DEFAULTS["short_day"])
+    if not isinstance(cfg.get("timing"), dict):
+        cfg["timing"] = copy.deepcopy(DEFAULTS["timing"])
+    _valid_timing(cfg["timing"], DEFAULTS["timing"])
+    cfg["disabled_bells"] = _valid_disabled(cfg.get("disabled_bells"))
     profiles = cfg.get("profiles") if isinstance(cfg.get("profiles"), dict) else {}
     cfg["profiles"] = {}
     for name, p in profiles.items():
         if isinstance(p, dict):
-            # Eksik ya da bozuk program ayarları güncel ayarlarla tamamlanır.
+            # Eksik ya da bozuk program ayarları güncel ayarlarla tamamlanır; her bölüm ana ayarlardaki
+            # gibi denetlenir ki bozuk bir program o günün bütün programlarını sıfırlatmasın.
             fixed = _merge({k: cfg[k] for k in PROFILE_KEYS}, p)
             fixed["manual_lessons"] = _valid_rows(fixed.get("manual_lessons")) or cfg["manual_lessons"]
+            fixed["day_overrides"] = _valid_overrides(fixed.get("day_overrides"))
+            fixed["disabled_bells"] = _valid_disabled(fixed.get("disabled_bells"))
+            fixed["second_shift"] = _valid_second_shift(fixed.get("second_shift"))
+            _valid_timing(fixed["timing"], DEFAULTS["timing"])
             cfg["profiles"][str(name)] = fixed
-    second = cfg.get("second_shift")
-    if not isinstance(second, dict):
-        cfg["second_shift"] = copy.deepcopy(DEFAULTS["second_shift"])
-    else:
-        second["manual_lessons"] = _valid_rows(second.get("manual_lessons"))
-        if not isinstance(second.get("timing"), dict):
-            second["timing"] = copy.deepcopy(DEFAULTS["second_shift"]["timing"])
-    if not isinstance(cfg.get("short_day"), dict):
-        cfg["short_day"] = copy.deepcopy(DEFAULTS["short_day"])
-    t = cfg.get("timing")
-    if isinstance(t, dict):
-        days = t.get("assembly_days")
-        t["assembly_days"] = sorted({d for d in days if isinstance(d, int) and 0 <= d <= 6}) \
-            if isinstance(days, list) else list(range(7))
-        at = t.get("assembly_time")
-        if not isinstance(at, str) or (at and not re.fullmatch(r"([01]?\d|2[0-3]):[0-5]\d", at.strip())):
-            t["assembly_time"] = ""
-        if not isinstance(t.get("assembly_name"), str):
-            t["assembly_name"] = DEFAULTS["timing"]["assembly_name"]
     lunch = cfg["short_day"].get("lunch_minutes")
     if lunch is not None:
         cfg["short_day"]["lunch_minutes"] = _number(lunch, None, 0, 180)
@@ -382,9 +436,6 @@ def _sanitize(cfg: dict) -> dict:
         cer["volume"] = max(10, min(100, int(cer.get("volume", 100))))
     except (TypeError, ValueError, OverflowError):
         cer["volume"] = 100
-    disabled = cfg.get("disabled_bells") if isinstance(cfg.get("disabled_bells"), dict) else {}
-    cfg["disabled_bells"] = {str(k): [x for x in v if isinstance(x, str)]
-                             for k, v in disabled.items() if isinstance(v, list)}
     skip = cfg.get("skip_today")
     if not isinstance(skip, dict) or not isinstance(skip.get("ids", []), list):
         cfg["skip_today"] = {"date": None, "ids": []}

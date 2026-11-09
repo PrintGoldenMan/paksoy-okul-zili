@@ -111,3 +111,14 @@ class AssemblyAdvancedTests(unittest.TestCase):
         self.assertEqual(cfg["timing"]["assembly_days"], [0])
         self.assertEqual(cfg["timing"]["assembly_time"], "")
         self.assertEqual(cfg["timing"]["assembly_name"], "Toplanma Zili")
+
+    def test_empty_days_mean_every_day(self):
+        # Elle düzenlenmiş boş liste pencerede bütün günler seçili görünür; ayar da öyle düzeltilir.
+        cfg = config._sanitize(config._merge(config.DEFAULTS, {"timing": {"assembly_days": []}}))
+        self.assertEqual(cfg["timing"]["assembly_days"], list(range(7)))
+
+    def test_first_lesson_just_after_midnight(self):
+        # 00:05'teki ilk dersin 10 dk öncesi önceki güne düşer: toplanma zili çalmaz, öğrenci zili çalar.
+        self.cfg["timing"]["first_lesson"] = "00:05"
+        self.assertIsNone(schedule.assembly_minute(self.cfg, 5))
+        self.assertEqual(morning(self.cfg)[:2], [("00:03", "ogrenci"), ("00:05", "ogretmen")])

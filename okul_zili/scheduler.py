@@ -13,7 +13,8 @@ log = logging.getLogger(__name__)
 # (Profesyonel düzeyde "grace_seconds" ile değiştirilebilir).
 GRACE_SECONDS = 45
 # Tören (İstiklal Marşı) sırasında gelen ziller bekletilir; tören bitince bu kadar ara verilip
-# yalnızca en son bekleyen zil çalar. Zilin saatinin üzerinden HELD_MAX_SECONDS geçtiyse artık çalmaz.
+# yalnızca en son dakikada bekleyen zil(ler) çalar. Zilin saatinin üzerinden HELD_MAX_SECONDS geçtiyse
+# artık çalmaz. Bu arada daha yeni bir zil çalarsa bekleyenler geçersiz olur.
 HELD_GAP_SECONDS = 3
 HELD_MAX_SECONDS = 5 * 60
 
@@ -146,20 +147,36 @@ class BellScheduler:
         return list(self._held)
 
     def _release_held(self, now, cfg):
-        """Tören bitti: bekletilen zillerden yalnızca en sonuncusu çalar (öncekiler artık geçersiz)."""
+        """Tören bitti: bekletilen zillerden yalnızca en son dakikadakiler çalar (öncekiler artık geçersiz).
+        Aynı dakikada birden çok zil bekliyorsa (ör. toplanma zili ile ek zil) hepsi çizelgedeki sırayla çalar."""
         held, self._held, self._release_at = self._held, [], None
-        event = held[-1]
-        for e in held[:-1]:
-            log.info("Tören sırasında gelen zil atlandı (yerine daha sonraki çalıyor): %s %s", e.time_str, e.label)
-        late = now.hour * 3600 + now.minute * 60 + now.second - event.minute * 60
-        if late > HELD_MAX_SECONDS or late < 0:
-            log.info("Tören uzun sürdü; bekleyen zil artık çalınmadı: %s %s", event.time_str, event.label)
-        elif not cfg.get("auto_ring", True) or cfg.get("skip_date") == now.date().isoformat():
-            log.info("Ziller kapalı; töreni bekleyen zil çalınmadı: %s %s", event.time_str, event.label)
-        elif self._player.ring_scheduled(event):
-            log.info("Tören bitti, bekleyen zil çalıyor: %s %s", event.time_str, event.label)
-        else:
-            self._held = [event]   # bu arada yeni bir tören başladı: yine beklesin
+        last = max(e.minute for e in held)
+        latest = list({e.key: e for e in held if e.minute == last}.values())   # aynı zil iki kez çalmasın
+        for e in held:
+            if e.minute != last:
+                log.info("Tören sırasında gelen zil atlandı (yerine daha sonraki çalıyor): %s %s",
+                         e.time_str, e.label)
+        late = now.hour * 3600 + now.minute * 60 + now.second - last * 60
+        for i, event in enumerate(latest):
+            if late > HELD_MAX_SECONDS or late < 0:
+                log.info("Tören uzun sürdü; bekleyen zil artık çalınmadı: %s %s", event.time_str, event.label)
+            elif not cfg.get("auto_ring", True) or cfg.get("skip_date") == now.date().isoformat():
+                log.info("Ziller kapalı; töreni bekleyen zil çalınmadı: %s %s", event.time_str, event.label)
+            elif self._player.ring_scheduled(event):
+                log.info("Tören bitti, bekleyen zil çalıyor: %s %s", event.time_str, event.label)
+            else:
+                self._held = latest[i:]   # bu arada yeni bir tören başladı: yine beklesin
+                break
+
+    def _supersede_held(self, event):
+        """Tören bittikten sonraki arada daha yeni bir zil çaldı: bekleyen eski ziller artık geçersiz."""
+        stale = [e for e in self._held if e.minute <= event.minute]
+        if not stale:
+            return
+        for e in stale:
+            log.info("Tören sırasında gelen zil atlandı (yerine daha yeni zil çaldı): %s %s", e.time_str, e.label)
+        self._held = [e for e in self._held if e.minute > event.minute]
+        self._release_at = None
 
     def _tick(self, now):
         self._refresh(now)
@@ -174,13 +191,6 @@ class BellScheduler:
                 log.info("Tören başladı; sıradaki zil tören bitince çalacak: %s %s", e.time_str, e.label)
             self._held = sorted(self._held + preempted, key=lambda e: e.minute)
             self._release_at = None
-        if self._held:
-            if getattr(self._player, "ceremony_active", False):
-                self._release_at = None
-            elif self._release_at is None:
-                self._release_at = now + dt.timedelta(seconds=HELD_GAP_SECONDS)
-            elif now >= self._release_at:
-                self._release_held(now, cfg)
         for e in self._events:
             if e.key in self._fired:
                 continue
@@ -196,6 +206,7 @@ class BellScheduler:
                     log.info("Bugün ziller kapalı, çalınmadı: %s %s", e.time_str, e.label)
                 elif self._player.ring_scheduled(e):
                     log.info("Zil çalıyor: %s %s", e.time_str, e.label)
+                    self._supersede_held(e)
                 else:
                     log.info("Tören sürüyor; zil tören bitince çalacak: %s %s", e.time_str, e.label)
                     self._held.append(e)
@@ -203,3 +214,12 @@ class BellScheduler:
                 self._on_ring(e)
             elif delta > grace:
                 self._claim(e, handled=False)
+        # Bekleyen ziller zamanı gelen yeni zillerden sonra ele alınır: aynı anda daha yeni bir zil
+        # çaldıysa bekleyenler zaten geçersiz sayılmıştır.
+        if self._held:
+            if getattr(self._player, "ceremony_active", False):
+                self._release_at = None
+            elif self._release_at is None:
+                self._release_at = now + dt.timedelta(seconds=HELD_GAP_SECONDS)
+            elif now >= self._release_at:
+                self._release_held(now, cfg)

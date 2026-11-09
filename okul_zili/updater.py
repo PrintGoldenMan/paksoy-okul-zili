@@ -8,6 +8,7 @@ Yeni bir sürüm varsa ana ekranda «Güncelleme var» düğmesi görünür. «G
   * Kaynak koddan çalışırken: sürüm sayfası tarayıcıda açılır.
 """
 
+import hashlib
 import json
 import logging
 import os
@@ -193,6 +194,15 @@ def prepare_and_launch(info, progress=None):
     return True
 
 
+def _expected_sha256(sums: bytes, name: str):
+    """SHA256SUMS içeriğinden (sha256sum çıktısı: «<özet>  <ad>») dosyanın beklenen özeti; yoksa None."""
+    for line in sums.decode("utf-8", "replace").splitlines():
+        parts = line.strip().split(None, 1)
+        if len(parts) == 2 and parts[1].lstrip("*") == name and re.fullmatch(r"[0-9a-fA-F]{64}", parts[0]):
+            return parts[0].lower()
+    return None
+
+
 def _prepare_linux(info, progress=None):
     """Linux: paketteki «okulzili» dosyası çalışan programın yerine yazılır (Linux, çalışan dosyanın yerine
     yenisinin konmasına izin verir) ve program yeni sürümle yeniden açılır."""
@@ -203,20 +213,35 @@ def _prepare_linux(info, progress=None):
         webbrowser.open(info.get("page") or f"https://github.com/{REPO}/releases/latest")
         return False
     tmp = Path(tempfile.mkdtemp(prefix="okulzili_guncelleme_"))
-    archive = tmp / "paket.tar.gz"
-    _download(info["linux"], archive, progress)
     new = current.with_name(current.name + ".yeni")
-    with tarfile.open(archive, "r:gz") as tar:
-        member = next((m for m in tar.getmembers() if m.isfile() and Path(m.name).name == "okulzili"), None)
-        if member is None:
-            raise OSError("Güncelleme paketinde program dosyası bulunamadı")
-        with tar.extractfile(member) as src, open(new, "wb") as dst:
-            shutil.copyfileobj(src, dst)
-    if new.stat().st_size < 1_000_000:
+    try:
+        archive = tmp / "paket.tar.gz"
+        _download(info["linux"], archive, progress)
+        with tarfile.open(archive, "r:gz") as tar:
+            files = [m for m in tar.getmembers() if m.isfile()]
+            member = next((m for m in files if Path(m.name).name == "okulzili"), None)
+            if member is None:
+                raise OSError("Güncelleme paketinde program dosyası bulunamadı")
+            digest = hashlib.sha256()
+            with tar.extractfile(member) as src, open(new, "wb") as dst:
+                for chunk in iter(lambda: src.read(1024 * 1024), b""):
+                    digest.update(chunk)
+                    dst.write(chunk)
+            sums = next((m for m in files if Path(m.name).name == "SHA256SUMS"
+                         and Path(m.name).parent == Path(member.name).parent), None)
+            expected = _expected_sha256(tar.extractfile(sums).read(), "okulzili") if sums is not None else None
+        if new.stat().st_size < 1_000_000:
+            raise OSError("İndirilen program dosyası eksik görünüyor")
+        if expected is not None and digest.hexdigest() != expected:
+            raise OSError("Güncelleme paketindeki program dosyası bozuk (SHA256 tutmuyor). Lütfen tekrar deneyin.")
+        new.chmod(0o755)
+        new.replace(current)
+    except BaseException:
         new.unlink(missing_ok=True)
-        raise OSError("İndirilen program dosyası eksik görünüyor")
-    new.chmod(0o755)
-    new.replace(current)
+        raise
+    finally:
+        # İndirilen paket (onlarca MB) geçici klasörde kalmasın.
+        shutil.rmtree(tmp, ignore_errors=True)
     mark_updating()
     log.info("Güncelleme kuruldu, program yeniden açılıyor: %s", info["version"])
     # Yeni süreç, bu program kapanıp tek kopya kilidini bırakana kadar bekler (--oz-restart).

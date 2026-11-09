@@ -45,6 +45,58 @@ class DesktopExecTests(unittest.TestCase):
                 self.assertEqual(f.read(), __version__ + "\n")
 
 
+class LinuxUpdateTests(unittest.TestCase):
+    """Linux'ta kendini güncelleme: paketteki SHA256SUMS denetlenir, indirilen paket silinir."""
+
+    def _run(self, tmp, corrupt):
+        import hashlib
+        import io
+        import shutil
+        import tarfile
+        from okul_zili import updater
+        exe = os.path.join(tmp, "kurulu", "okulzili")
+        os.makedirs(os.path.dirname(exe))
+        with open(exe, "wb") as f:
+            f.write(b"eski")
+        data = os.urandom(1_100_000)
+        package = os.path.join(tmp, "paket.tar.gz")
+        with tarfile.open(package, "w:gz") as tar:
+            digest = hashlib.sha256(b"baska" if corrupt else data).hexdigest()
+            for name, content in (("OkulZili-Linux-9.9/okulzili", data),
+                                  ("OkulZili-Linux-9.9/SHA256SUMS", f"{digest}  okulzili\n".encode())):
+                info = tarfile.TarInfo(name)
+                info.size = len(content)
+                tar.addfile(info, io.BytesIO(content))
+        made = []
+        real_mkdtemp = tempfile.mkdtemp
+
+        def mkdtemp(**kw):
+            made.append(real_mkdtemp(dir=tmp, **kw))
+            return made[-1]
+        with mock.patch.object(updater.sys, "executable", exe), \
+                mock.patch.object(updater, "_download", lambda url, target, progress=None: shutil.copy(package, target)), \
+                mock.patch.object(updater.tempfile, "mkdtemp", mkdtemp), \
+                mock.patch.object(updater, "mark_updating"), mock.patch.object(updater.subprocess, "Popen") as popen:
+            try:
+                return updater._prepare_linux({"linux": "https://ornek/paket.tar.gz", "version": "9.9"}), popen
+            finally:
+                self.assertFalse(os.path.exists(made[0]))            # indirilen paket silindi
+                self.assertFalse(os.path.exists(exe + ".yeni"))
+                with open(exe, "rb") as f:
+                    self.assertEqual(f.read() == data, not corrupt)
+
+    def test_valid_package_installed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            launched, popen = self._run(tmp, corrupt=False)
+            self.assertTrue(launched)
+            popen.assert_called_once()
+
+    def test_checksum_mismatch_refused(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaisesRegex(OSError, "SHA256"):
+                self._run(tmp, corrupt=True)
+
+
 @unittest.skipUnless(sys.platform.startswith("linux"), "yalnızca Linux")
 class AutostartTests(unittest.TestCase):
     def setUp(self):
